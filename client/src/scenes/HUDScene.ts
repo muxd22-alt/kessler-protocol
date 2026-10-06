@@ -550,13 +550,12 @@ export class HUDScene extends Phaser.Scene {
 
     update(_time: number, _delta: number) {
         void _time; void _delta;
-        // FPS + entity counter
-        const ents = this.gs ? this.gs.snapshotEnemies().length : 0;
-        this.fpsText.setText(`${Math.round(this.game.loop.actualFps)} fps · ${ents} contacts${this.muted ? ' · MUTED' : ''}`);
+        if (!this.gs) return;
+        // One snapshot per frame drives both the counter and the overlays.
+        const live = this.gs.snapshotEnemies();
+        this.fpsText.setText(`${Math.round(this.game.loop.actualFps)} fps · ${live.length} contacts${this.muted ? ' · MUTED' : ''}`);
 
         // Follow enemies with their overlays; retire stale ones.
-        if (!this.gs) return;
-        const live = this.gs.snapshotEnemies();
         const byId = new Map(live.map((e) => [e.id, e]));
         const now = this.time.now;
         const dead: string[] = [];

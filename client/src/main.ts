@@ -10,14 +10,21 @@ const config: Phaser.Types.Core.GameConfig = {
     height: window.innerHeight,
     backgroundColor: '#060612',
     disableContextMenu: true,
-    render: { antialias: true, pixelArt: false, roundPixels: false },
+    render: {
+        antialias: true,
+        pixelArt: false,
+        roundPixels: false,
+        powerPreference: 'high-performance'
+    },
     physics: {
         default: 'arcade',
         arcade: { gravity: { x: 0, y: 0 }, debug: false, fps: 60 }
     },
     scale: {
         mode: Phaser.Scale.RESIZE,
-        autoCenter: Phaser.Scale.CENTER_BOTH
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        width: window.innerWidth,
+        height: window.innerHeight
     },
     fps: { target: 60, smoothStep: true },
     scene: [BootScene, GameScene, HUDScene]

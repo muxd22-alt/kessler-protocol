@@ -1,0 +1,16 @@
+{
+  "name": "Kessler Protocol — Edge AI Shooter",
+  "short_name": "Kessler",
+  "description": "Every enemy flown live by one local decision model. Probabilistic AI at 60 FPS.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#060612",
+  "theme_color": "#060612",
+  "categories": ["games"],
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

@@ -50,8 +50,9 @@ export class GameScene extends Phaser.Scene {
     private enemyBullets!: Phaser.Physics.Arcade.Group;
     private meteors!: Phaser.Physics.Arcade.Group;
 
-    private starLayers: Phaser.GameObjects.Graphics[] = [];
-    private starPoints: { x: number; y: number; s: number; a: number; c: number }[][] = [];
+    private starTiles: Phaser.GameObjects.TileSprite[] = [];
+    private twinkleGfx!: Phaser.GameObjects.Graphics;
+    private twinklers: { x: number; y: number; s: number; c: number; v: number }[] = [];
     private nebulas: Phaser.GameObjects.Image[] = [];
     private overlayGfx!: Phaser.GameObjects.Graphics; // hp bars + intent vectors
     private sfx = new Sfx();
@@ -97,6 +98,9 @@ export class GameScene extends Phaser.Scene {
         const savedDiff = localStorage.getItem(DIFF_KEY);
         if (savedDiff === 'easy' || savedDiff === 'normal' || savedDiff === 'hard') this.difficulty = savedDiff;
 
+        // Graphics must exist before the starfield bakes into them.
+        this.twinkleGfx = this.add.graphics().setDepth(-10);
+        this.overlayGfx = this.add.graphics().setDepth(6);
         this.buildStarfield();
         this.buildNebulas();
         void this.loadTheme(); // ask the LLM side for a look-from-a-number
@@ -105,7 +109,6 @@ export class GameScene extends Phaser.Scene {
         this.playerBullets = this.physics.add.group();
         this.enemyBullets = this.physics.add.group();
         this.meteors = this.physics.add.group();
-        this.overlayGfx = this.add.graphics().setDepth(6);
 
         // ─── Player ───
         const w = this.scale.width, h = this.scale.height;
@@ -152,6 +155,8 @@ export class GameScene extends Phaser.Scene {
         this.physics.add.overlap(this.playerBullets, this.meteors, this.hitMeteor as never, undefined, this);
         this.physics.add.overlap(this.player, this.enemies, this.ramEnemy as never, undefined, this);
         this.physics.add.overlap(this.player, this.meteors, this.ramMeteor as never, undefined, this);
+        // Registered ONCE — creating colliders per frame is a huge perf leak.
+        this.physics.add.overlap(this.meteors, this.enemies, this.meteorHitsEnemy as never, undefined, this);
 
         // ─── Directors ───
         this.spawnTimer = this.time.addEvent({ delay: 2200, callback: this.spawnEnemy, callbackScope: this, loop: true, paused: true });
@@ -319,9 +324,7 @@ export class GameScene extends Phaser.Scene {
             const d = s.getData('ai') as EnemyData | undefined;
             if (d) this.paintEnemy(s, d);
         });
-        this.starPoints.forEach((pts) => pts.forEach((p) => {
-            p.c = t.stars[(Math.random() * t.stars.length) | 0];
-        }));
+        this.buildStarfield(); // re-bake with the new palette (only on theme change)
         this.events.emit('theme_changed', { seed: t.seed, name: t.name });
     }
 
@@ -363,18 +366,48 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ─── Background ───
+    // Stars are baked into one texture per layer and scrolled with TileSprite:
+    // 3 draw calls/frame instead of ~265 per-frame circles (huge mobile win).
     private buildStarfield() {
-        const w = this.scale.width, h = this.scale.height;
-        this.starLayers.forEach((g) => g.destroy());
-        this.starLayers = []; this.starPoints = [];
+        const w = Math.max(2, Math.ceil(this.scale.width));
+        const h = Math.max(2, Math.ceil(this.scale.height));
+        this.starTiles.forEach((t) => t.destroy());
+        this.starTiles = [];
         for (let layer = 0; layer < STAR_LAYERS; layer++) {
-            const g = this.add.graphics().setDepth(-10);
-            this.starLayers.push(g);
-            const pts: { x: number; y: number; s: number; a: number; c: number }[] = [];
-            for (let i = 0; i < STAR_COUNT[layer]; i++) {
-                pts.push({ x: Math.random() * w, y: Math.random() * h, s: 0.5 + Math.random() * (1.4 + layer), a: 0.25 + Math.random() * 0.6, c: this.theme.stars[(Math.random() * this.theme.stars.length) | 0] });
+            const key = `starRT${layer}`;
+            if (this.textures.exists(key)) this.textures.remove(key);
+            const rt = this.textures.createCanvas(key, w, h);
+            if (rt) {
+                const c = rt.getContext();
+                c.clearRect(0, 0, w, h);
+                for (let i = 0; i < STAR_COUNT[layer]; i++) {
+                    const sx = Math.random() * w;
+                    const sy = Math.random() * h;
+                    const r = 0.5 + Math.random() * (1.4 + layer);
+                    const a = 0.25 + Math.random() * 0.6;
+                    const col = this.theme.stars[(Math.random() * this.theme.stars.length) | 0];
+                    c.globalAlpha = a;
+                    c.fillStyle = `#${col.toString(16).padStart(6, '0')}`;
+                    c.beginPath();
+                    c.arc(sx, sy, r, 0, Math.PI * 2);
+                    c.fill();
+                }
+                c.globalAlpha = 1;
+                rt.refresh();
             }
-            this.starPoints.push(pts);
+            const tile = this.add.tileSprite(0, 0, w, h, key).setOrigin(0, 0).setDepth(-10);
+            this.starTiles.push(tile);
+        }
+        // A handful of live twinklers keep the sky breathing (cheap).
+        if (this.twinkleGfx) this.twinkleGfx.clear();
+        this.twinklers = [];
+        for (let i = 0; i < 14; i++) {
+            this.twinklers.push({
+                x: Math.random() * w, y: Math.random() * h,
+                s: 1 + Math.random() * 1.4,
+                c: this.theme.stars[(Math.random() * this.theme.stars.length) | 0],
+                v: 6 + Math.random() * 10
+            });
         }
     }
 
@@ -517,6 +550,23 @@ export class GameScene extends Phaser.Scene {
         void p;
     }
 
+    private meteorHitsEnemy(m: Phaser.GameObjects.GameObject, e: Phaser.GameObjects.GameObject) {
+        const meteor = m as Phaser.Physics.Arcade.Sprite;
+        const enemy = e as Phaser.Physics.Arcade.Sprite;
+        const data = enemy.getData('ai') as EnemyData | undefined;
+        this.spawnExplosion((meteor.x + enemy.x) / 2, (meteor.y + enemy.y) / 2, 0.9);
+        meteor.destroy();
+        if (data) {
+            data.health -= 2;
+            if (data.health <= 0) {
+                this.events.emit('enemy_died', enemy.name);
+                this.score += 5;
+                this.events.emit('score_change', this.score);
+                enemy.destroy();
+            }
+        } else enemy.destroy();
+    }
+
     private hitMeteor(bullet: Phaser.GameObjects.GameObject, meteor: Phaser.GameObjects.GameObject) {
         (bullet as Phaser.Physics.Arcade.Sprite).destroy();
         const m = meteor as Phaser.Physics.Arcade.Sprite;
@@ -580,20 +630,20 @@ export class GameScene extends Phaser.Scene {
         const delta = Math.min(rawDelta, 50);
         const w = this.scale.width, h = this.scale.height;
 
-        // Starfield always drifts (even in menus — alive backdrop).
-        for (let layer = 0; layer < STAR_LAYERS; layer++) {
-            const g = this.starLayers[layer];
-            if (!g) continue;
-            g.clear();
-            const pts = this.starPoints[layer];
-            const speedMul = this.phase === 'playing' ? 1 : 0.35;
-            for (const p of pts) {
-                p.y += STAR_SPEED[layer] * delta * 0.12 * speedMul;
-                if (p.y > h) { p.y = 0; p.x = Math.random() * w; }
-                const flicker = p.a + Math.sin(time * 0.003 + p.x) * 0.15;
-                g.fillStyle(p.c, Math.max(0.05, Math.min(1, flicker)));
-                g.fillCircle(p.x, p.y, p.s);
-            }
+        // Scrolling baked layers (3 tile writes) + a few live twinklers.
+        const speedMul = this.phase === 'playing' ? 1 : 0.35;
+        for (let layer = 0; layer < this.starTiles.length; layer++) {
+            const tile = this.starTiles[layer];
+            tile.tilePositionY = (tile.tilePositionY + STAR_SPEED[layer] * delta * 0.12 * speedMul) % h;
+        }
+        this.twinkleGfx.clear();
+        for (let i = 0; i < this.twinklers.length; i++) {
+            const t = this.twinklers[i];
+            t.y += t.v * delta * 0.06 * speedMul;
+            if (t.y > h) { t.y = 0; t.x = Math.random() * w; }
+            const a = 0.3 + Math.abs(Math.sin(time * 0.0025 + t.x)) * 0.7;
+            this.twinkleGfx.fillStyle(t.c, a);
+            this.twinkleGfx.fillCircle(t.x, t.y, t.s);
         }
         this.nebulas.forEach((n, i) => { n.x += Math.sin(time * 0.0001 + i * 2) * delta * 0.004; });
 
@@ -718,34 +768,18 @@ export class GameScene extends Phaser.Scene {
             }
         });
 
-        // Meteors vs enemies: rocks don't take sides.
-        this.physics.overlap(this.meteors, this.enemies, (m, e) => {
-            const meteor = m as Phaser.Physics.Arcade.Sprite;
-            const enemy = e as Phaser.Physics.Arcade.Sprite;
-            const data = enemy.getData('ai') as EnemyData | undefined;
-            this.spawnExplosion((meteor.x + enemy.x) / 2, (meteor.y + enemy.y) / 2, 0.9);
-            meteor.destroy();
-            if (data) {
-                data.health -= 2;
-                if (data.health <= 0) {
-                    this.events.emit('enemy_died', enemy.name);
-                    this.score += 5;
-                    this.events.emit('score_change', this.score);
-                    enemy.destroy();
-                }
-            } else enemy.destroy();
-        });
+        // (meteor × enemy collisions are a persistent collider registered in create())
 
-        // Cleanup
-        const cleanup = (g: Phaser.Physics.Arcade.Group) => {
-            g.getChildren().forEach((b) => {
-                const s = b as Phaser.Physics.Arcade.Sprite;
+        // Cleanup — one snapshot per group per frame (getChildren() copies).
+        const cleanup = (list: Phaser.GameObjects.GameObject[]) => {
+            for (let i = 0; i < list.length; i++) {
+                const s = list[i] as Phaser.Physics.Arcade.Sprite;
                 if (s.y < -40 || s.y > h + 40 || s.x < -40 || s.x > w + 40) s.destroy();
-            });
+            }
         };
-        cleanup(this.playerBullets);
-        cleanup(this.enemyBullets);
-        cleanup(this.meteors);
+        cleanup(this.playerBullets.getChildren());
+        cleanup(this.enemyBullets.getChildren());
+        cleanup(this.meteors.getChildren());
 
         this.drawOverlay();
     }
