@@ -47,21 +47,72 @@ replaced all of that with **one lightweight System One decision model**:
   belief gain, confusion noise, and decision cadence first — speed, fire rate,
   elites, and mercy invulnerability follow to match.
 
-## 2. Features
+## 2. What System One is — and why it isn't "just another enemy AI"
+
+System One is a **small decision model that plays the role of a whole enemy
+squad's commander**. Every 90–300 ms it answers, for every agent at once:
+*"what is your intent, how sure are you, and what were the alternatives?"* It
+never moves a pixel itself — a 60 FPS steering layer turns its intents into
+motion. That split is the whole trick: **slow, smart, probabilistic decisions;
+fast, dumb, smooth movement.**
+
+| | Behavior trees / FSM | Utility AI | Scripted patterns | Cloud LLM | **System One (here)** |
+|---|---|---|---|---|---|
+| Decision style | hard rules, nested branches | hand-weighted scores | fixed choreography | giant prompt, network | **probabilistic intent + full distribution** |
+| Many agents | N rule sets to maintain | N weight vectors | one timeline per enemy | one giant prompt, slow, costly | **one model, one batched call** |
+| Uncertainty | invisible — it just picks a branch | invisible — scores hide doubt | n/a | vague prose | **explicit confidence + per-option bars** |
+| Explainability | "rule 7 fired" | "because weight 0.8" | script line #412 | plausible text | **live input drivers with signed impact** |
+| New behaviour | author more rules | re-tune weights | author more script | unpredictable, slow | **generalises from the same scoring** |
+| Cost / latency | ~0 | ~0 | ~0 | 100s ms + network + $ | **<1 ms in-process, works offline** |
+| Works offline | yes | yes | yes | **no** | **yes (local twin)** |
+
+The four things that make this demo different from an ordinary shmup:
+
+1. **You can see the mind.** Every enemy carries a live panel: intent, confidence
+   %, and its full probability distribution. Nothing is hidden behind an
+   animation.
+2. **It knows what it doesn't know.** Inject EMP noise and watch confidence
+   collapse toward the 20–25% floor, then *recover* as evidence returns. A
+   behavior tree cannot be uncertain; this system is uncertainty-aware by
+   construction.
+3. **One call decides a squad.** Surge six contacts and watch a single batched
+   request return six sets of beliefs — no per-agent round trips.
+4. **Difficulty is a brain parameter, not a damage multiplier.** EASY/ HARD
+   change belief gain, confusion noise and decision cadence *first*; speed, fire
+   rate, elites and i-frames follow to match.
+
+Press **I** (or tap **◈ SYSTEM ONE**) in game for the live panel: capabilities,
+the comparison above, session stats (engine, decisions issued, rolling average
+confidence, agents per batch, cadence) and a **"why it chose"** readout showing
+the signed drivers behind the most confident agent's decision — proximity, own
+hull, threat density, flank bias, player hull.
+
+## 3. Features
 
 | System | What it does |
 |---|---|
 | 🧠 System One bridge | Batched intents + confidence + full distributions, in-flight guard, per-load adaptive cadence |
-| 📊 AI telemetry HUD | Per-enemy probability overlays, live decision feed, latency sparkline, server/local status dot |
+| 📊 AI telemetry HUD | Per-enemy probability overlays, live decision feed, latency sparkline, server/local status |
+| ◈ System One panel | Capabilities vs classic AI, live session stats, signed "why it chose" drivers (explainability) |
 | 🎚️ AI Stress Lab (⚙) | EMP pulse, missile barrage, hull sabotage, surge spawns, spawn/speed/noise sliders |
-| 🎨 Seed themes | One seed → entire look: faction ship colors, faction fire, stars, sky, nebulas (`T` to remix, `GET /v1/theme?seed=…`) |
-| ⚔️ Difficulty modes | EASY dazed AI @300 ms … HARD razor beliefs @90 ms, faster, relentless, elite-dense |
-| ✨ Game feel | Parallax stars, nebulas, warp-in spawns, shockwave explosions, score popups, combos, screen shake, synth SFX (zero audio assets), high-score persistence |
+| 🎨 Seed themes | One seed → entire look: faction ship colors, faction fire, stars, sky, nebulas (`T` to remix) |
+| ⚔️ Difficulty modes | EASY dazed AI @300 ms … HARD razor beliefs @90 ms, faster, ruthless, elite-dense |
+| 📱 Mobile / foldable | One-thumb drag steering, optional FIRE/EMP thumb pads, safe-area aware, portrait+landscape, tablet-scale ships, tablet/foldable viewport handling |
+| ✨ Game feel | Baked parallax starfield (3 draw calls), nebulas, warp-in spawns, shockwave explosions, score popups, combos, screen shake, synth SFX, high-score persistence |
 
-**Controls:** hold click / WASD fly · SPACE fire · **E** EMP · **T** remix theme ·
-**P** pause · **M** mute · **R** restart · ⚙ stress lab.
+**Desktop:** hold click / WASD fly · SPACE fire · **E** EMP · **T** remix theme ·
+**I** System One panel · **P** pause · **M** mute · **R** restart · ⚙ stress lab.
 
-## 3. Quickstart
+**Mobile (1–2 thumbs):**
+- **One thumb:** press and drag anywhere to fly — the ship keeps its offset from
+  your finger so your thumb never covers it — and it auto-fires while you steer.
+- **Two thumbs:** left thumb drags to fly, right thumb holds the on-screen
+  **FIRE** pad; the smaller **EMP** pad sits above-left of it.
+- **❚❚** pauses; **◈ SYSTEM ONE** opens the explainability panel; ⚙ opens the
+  stress lab. All pads respect notch/punch-hole safe areas and reposition on
+  rotation, fold or windowed mode.
+
+## 4. Quickstart
 
 ### A. Just play (hosted demo)
 Open the Pages link above. It auto-detects "no local backend" and runs the
@@ -102,7 +153,7 @@ python benchmark.py          # over HTTP against a running server
 | Frame rate | 60 FPS | decoupled loop, zero AI stalls |
 | Fallback triggers | 0% | GBNF-pinned schema |
 
-## 4. The decision API (for hackers)
+## 5. The decision API (for hackers)
 
 Base `http://127.0.0.1:8088`:
 
@@ -122,7 +173,7 @@ With a real model drop `decider-2b-q4_k_m.gguf` into `server/models/` (see
 the server picks it up automatically with a GBNF grammar pinning the answer
 schema; otherwise the heuristic twin serves transparently (labelled).
 
-## 5. Assets — all free, all credited
+## 6. Assets — all free, all credited
 
 All art is **[Kenney Space Shooter Redux/Extension (CC0)](https://kenney.nl/assets/space-shooter-redux)** —
 ships, missiles, meteors, effects, station parts live in
@@ -131,7 +182,7 @@ procedurally generated at runtime — the repo ships zero binary blobs beyond
 the Kenney PNGs. `client/public/assets/download_assets.py` documents the
 original fetch recipe.
 
-## 6. Deployment (GitHub Pages — free, automatic)
+## 7. Deployment (GitHub Pages — free, automatic)
 
 This repo ships a Pages workflow (`.github/workflows/pages.yml`): every push
 to `main` typechecks, builds, and publishes `client/dist`.
@@ -176,15 +227,17 @@ What we do to get there:
   domain**; on the default `*.github.io` host GitHub serves its own 10-minute
   cache (gzip is applied either way, as shown above).
 
-## 7. Project layout
+## 8. Project layout
 
 ```
 kessler_protocol/
 ├── client/                  # Phaser 3 + TypeScript + Vite (+ Capacitor for APK)
 │   ├── src/
-│   │   ├── scenes/          # Boot (loader) · Game (sim) · HUD (telemetry/menus)
+│   │   ├── scenes/          # Boot (loader) · Game (sim) · HUD (telemetry/menus/panels)
 │   │   ├── ai/localBrain.ts # TS twin of the server brain + DIFF_AI presets
-│   │   └── fx/              # theme.ts (seed looks + serverEnabled) · sfx.ts
+│   │   ├── ai/              # …+ explainFactors(): signed "why it chose" drivers
+│   │   ├── fx/              # theme.ts (seed looks + serverEnabled) · sfx.ts
+│   │   └── ui/safeArea.ts   # notch/foldable insets + responsive UI/entity scales
 │   └── public/assets/       # Kenney CC0 art
 ├── server/                  # FastAPI decision bridge
 │   ├── main.py              # heuristic brain · DIFF_PRESETS · /v1/* · benchmark
@@ -197,7 +250,7 @@ Mobile tiers: **Tier 1** (this repo) desktop Python bridge · **Tier 2** pure
 mobile web via the local twin — already how Pages runs · **Tier 3** native
 APK via the included Capacitor config (`npx cap add android && npx cap sync`).
 
-## 8. License
+## 9. License
 
 Code: Apache 2.0 (see `LICENSE`). Art: CC0 by Kenney — thanks for the pixels.
 PRs welcome: new intents, new moods, better calibration plots.

@@ -81,3 +81,31 @@ export function shootUrgency(enemyId: string, s: BrainState): number {
     const n = 0.25 + 0.65 * prox + gauss() * (BASE_JITTER + (s.noise ?? 0) * 0.25);
     return Math.max(0, Math.min(1, n));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Explainability — WHY an enemy chose what it chose.
+//  This is the core differentiator versus behavior trees: the system can show
+//  its reasoning as magnitudes instead of "rule 7 fired".
+//  impact: -1 (fully defensive) … +1 (fully aggressive)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface Factor { label: string; detail: string; impact: number }
+
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+
+export function explainFactors(enemyId: string, s: BrainState): Factor[] {
+    const self = s.enemies.find((e) => e.id === enemyId);
+    if (!self) return [];
+    const dist = Math.hypot(s.px - self.x, s.py - self.y);
+    const far = clamp01(dist / 700);
+    const hurt = 1 - clamp01(self.hp01);
+    const danger = clamp01(s.projCount / 14);
+    const side = self.x < s.px ? -1 : 1;
+    return [
+        { label: 'proximity', detail: `${Math.round(dist)}px · ${Math.round(far * 100)}% far`, impact: (1 - far) * 1.0 - 0.5 },
+        { label: 'own hull', detail: `${Math.round(self.hp01 * 100)}%`, impact: -hurt },
+        { label: 'threat density', detail: `${s.projCount} proj`, impact: danger * 0.8 },
+        { label: 'flank bias', detail: side < 0 ? 'left of player' : 'right of player', impact: side * 0.5 },
+        { label: 'player hull', detail: `${Math.round(s.php01 * 100)}%`, impact: -(1 - s.php01) * 0.6 }
+    ];
+}

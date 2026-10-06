@@ -1,7 +1,11 @@
 import * as Phaser from 'phaser';
-import { scoreOptions, shootUrgency, DIFF_AI, type Difficulty } from '../ai/localBrain';
+import { scoreOptions, shootUrgency, DIFF_AI, type Difficulty, type BrainState } from '../ai/localBrain';
 import { Sfx } from '../fx/sfx';
 import { fetchTheme, themeFromSeed, serverEnabled, type Theme } from '../fx/theme';
+import { entityScale, resetSafeArea } from '../ui/safeArea';
+
+export type GamePhase = 'menu' | 'playing' | 'paused' | 'over';
+export type ControlMode = 'auto' | 'touch' | 'keys';
 
 // ──────────────────────────────────────────────────────────────────────────────
 //  GAME SCENE — Kessler Protocol showcase
@@ -9,8 +13,6 @@ import { fetchTheme, themeFromSeed, serverEnabled, type Theme } from '../fx/them
 //  Craig-Reynolds-style steering runs at 60 FPS. A local heuristic twin keeps
 //  the demo intelligent when the decision server is offline.
 // ──────────────────────────────────────────────────────────────────────────────
-
-export type GamePhase = 'menu' | 'playing' | 'paused' | 'over';
 
 interface EnemyData {
     health: number;
@@ -63,10 +65,28 @@ export class GameScene extends Phaser.Scene {
     private keys: Record<string, Phaser.Input.Keyboard.Key> = {};
     private god: GodConfig = { spawnScale: 1, speedScale: 1, noise: 0 };
 
+    // ── Mobile / foldable support ──
+    controlMode: ControlMode = 'auto';
+    private steerPointer = -1;
+    private originX = 0;
+    private originY = 0;
+    private shipAnchorX = 0;
+    private shipAnchorY = 0;
+    private uiRects: { x: number; y: number; w: number; h: number }[] = [];
+    private touchFire = false;
+    private entScale = 1;
+
+    // ── Showcase stats ──
+    private decisionCount = 0;
+    private confSum = 0;
+    private confN = 0;
+    private brainState: BrainState | null = null;
+    private lastCadence = 150;
+
     private lastFired = 0;
     private decisionTimer = 0;
     private decisionInFlight = false;
-    private aiOnline: boolean | null = null;
+    aiOnline: boolean | null = null;
 
     private wave = 1;
     private score = 0;
@@ -113,7 +133,7 @@ export class GameScene extends Phaser.Scene {
         // ─── Player ───
         const w = this.scale.width, h = this.scale.height;
         this.player = this.physics.add.sprite(w / 2, h - 110, 'player_ship');
-        this.player.setScale(0.7).setDepth(10).setCollideWorldBounds(true);
+        this.player.setScale(0.7 * this.entScale).setDepth(10).setCollideWorldBounds(true);
         this.player.setTint(this.theme.player);
         this.playerHealth = this.maxHealth;
 
@@ -125,18 +145,39 @@ export class GameScene extends Phaser.Scene {
         }).setDepth(9);
 
         // ─── Input ───
+        // Mouse = direct point-to-ship. Touch = relative drag, so the thumb
+        // never covers the ship (the ship keeps its offset from the finger).
+        // Works one-thumb (drag to fly, auto-fire) or two-thumb (left thumb
+        // drags, right thumb holds FIRE).
+        this.entScale = entityScale(this.scale.width, this.scale.height);
         this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
-            if (this.phase !== 'playing' || !p.isDown) return;
-            this.physics.moveToObject(this.player, { x: p.worldX, y: p.worldY }, 420);
+            if (this.phase !== 'playing' || !p.isDown || p.id !== this.steerPointer) return;
+            if (this.inUiRect(p.x, p.y)) return;
+            if (this.dragSteering(p)) {
+                const tx = this.shipAnchorX + (p.x - this.originX);
+                const ty = this.shipAnchorY + (p.y - this.originY);
+                this.physics.moveToObject(this.player, { x: tx, y: ty }, 520);
+            } else {
+                this.physics.moveToObject(this.player, { x: p.worldX, y: p.worldY }, 420);
+            }
         });
         this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
             this.sfx.unlock();
             if (this.phase !== 'playing') return;
-            this.physics.moveToObject(this.player, { x: p.worldX, y: p.worldY }, 420);
+            if (p.button !== 0) return;
+            if (this.inUiRect(p.x, p.y)) return; // that thumb belongs to a HUD button
+            this.steerPointer = p.id;
+            this.originX = p.x; this.originY = p.y;
+            this.shipAnchorX = this.player.x; this.shipAnchorY = this.player.y;
         });
-        this.input.on('pointerup', () => {
-            if (this.phase === 'playing') this.player.setVelocity(0);
-        });
+        const release = (p: Phaser.Input.Pointer) => {
+            if (p.id === this.steerPointer) {
+                this.steerPointer = -1;
+                if (this.phase === 'playing' && !this.anyKeyHeld()) this.player.setVelocity(0);
+            }
+        };
+        this.input.on('pointerup', release);
+        this.input.on('pointerupoutside', release);
         if (this.input.keyboard) {
             const kb = this.input.keyboard;
             this.keys = kb.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,P,E,M,R,ENTER,ESC,T') as Record<string, Phaser.Input.Keyboard.Key>;
@@ -144,6 +185,7 @@ export class GameScene extends Phaser.Scene {
             kb.on('keydown-ESC', () => this.togglePause());
             kb.on('keydown-E', () => this.fireEMP());
             kb.on('keydown-T', () => this.remixTheme());
+            kb.on('keydown-I', () => this.events.emit('hud:syspanel'));
             kb.on('keydown-M', () => { this.sfx.enabled = !this.sfx.enabled; this.events.emit('sfx_toggle', this.sfx.enabled); });
             kb.on('keydown-R', () => { if (this.phase === 'over') this.restart(); });
             kb.on('keydown-ENTER', () => { if (this.phase === 'menu' || this.phase === 'over') this.startGame(); });
@@ -185,8 +227,19 @@ export class GameScene extends Phaser.Scene {
         this.events.on('hud:pause', () => this.togglePause());
         this.events.on('hud:remix', () => this.remixTheme());
         this.events.on('hud:difficulty', (d: Difficulty) => this.setDifficulty(d));
+        this.events.on('hud:control_mode', (m: ControlMode) => this.setControlMode(m));
+        this.events.on('hud:fire', (down: boolean) => { this.touchFire = down; });
+        this.events.on('hud:emp_touch', () => this.fireEMP());
+        this.events.on('hud:pause_touch', () => this.togglePause());
+        this.events.on('hud:start_touch', () => { if (this.phase === 'menu' || this.phase === 'over') this.startGame(); });
 
         this.scale.on('resize', () => this.buildStarfield());
+        // Foldables/tablets report a real viewport change — not just window resize.
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', () => this.onResizeFoldable());
+        }
+        const savedCtrl = localStorage.getItem('kessler_control');
+        if (savedCtrl === 'touch' || savedCtrl === 'keys' || savedCtrl === 'auto') this.controlMode = savedCtrl;
 
         // Backend presence probe (drives the HUD status dot).
         void this.probeBackend();
@@ -289,6 +342,70 @@ export class GameScene extends Phaser.Scene {
             this.events.emit('game_phase', this.phase);
             this.events.emit('high_score', this.high);
         });
+    }
+
+    // ─── Mobile / foldable plumbing (driven by HUDScene) ───
+    setControlRects(rects: { x: number; y: number; w: number; h: number }[]) {
+        this.uiRects = rects;
+    }
+
+    private inUiRect(x: number, y: number): boolean {
+        const pad = 6;
+        for (const r of this.uiRects) {
+            if (x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad) return true;
+        }
+        return false;
+    }
+
+    setControlMode(m: ControlMode) {
+        this.controlMode = m;
+        localStorage.setItem('kessler_control', m);
+        this.events.emit('control_mode', m);
+    }
+
+    private dragSteering(p: Phaser.Input.Pointer): boolean {
+        if (this.controlMode === 'touch') return true;
+        if (this.controlMode === 'keys') return false;
+        return p.wasTouch === true;
+    }
+
+    private anyKeyHeld(): boolean {
+        return !!(
+            this.keys.A?.isDown || this.keys.D?.isDown || this.keys.W?.isDown || this.keys.S?.isDown ||
+            this.keys.LEFT?.isDown || this.keys.RIGHT?.isDown || this.keys.UP?.isDown || this.keys.DOWN?.isDown
+        );
+    }
+
+    getTouchActive(): boolean {
+        if (this.controlMode === 'touch') return true;
+        if (this.controlMode === 'keys') return false;
+        return !!this.sys.game.device.input.touch;
+    }
+
+    getAiStats() {
+        return {
+            engine: this.aiOnline === true ? 'server / llama.cpp-ready' : 'local twin (in-browser)',
+            decisions: this.decisionCount,
+            avgConf: this.confN > 0 ? this.confSum / this.confN : 0,
+            entities: this.enemies ? this.enemies.getLength() : 0,
+            cadence: Math.round(this.lastCadence),
+            difficulty: this.difficulty
+        };
+    }
+
+    getBrainState(): BrainState | null { return this.brainState; }
+
+    private onResizeFoldable() {
+        resetSafeArea();
+        const w = this.scale.width, h = this.scale.height;
+        this.entScale = entityScale(w, h);
+        this.buildStarfield();
+        this.player.setScale(0.7 * this.entScale);
+        this.player.setPosition(
+            Phaser.Math.Clamp(this.player.x, 24, w - 24),
+            Phaser.Math.Clamp(this.player.y, 40, h - 24)
+        );
+        this.events.emit('world_resized', { w, h });
     }
 
     // ─── Seed theme: one number → every color ───
@@ -451,7 +568,7 @@ export class GameScene extends Phaser.Scene {
         enemy.setData('ai', data);
         this.paintEnemy(enemy, data);
         // Warp-in
-        this.tweens.add({ targets: enemy, scale: scales[type] * (elite ? 1.25 : 1), duration: 350, ease: 'Back.easeOut' });
+        this.tweens.add({ targets: enemy, scale: scales[type] * this.entScale * (elite ? 1.25 : 1), duration: 350, ease: 'Back.easeOut' });
         const flash = this.add.image(x, 10, 'effect_flash').setScale(0.6).setAlpha(0.9).setDepth(8).setBlendMode(Phaser.BlendModes.ADD);
         this.tweens.add({ targets: flash, alpha: 0, scale: 1.4, duration: 300, onComplete: () => flash.destroy() });
 
@@ -470,7 +587,7 @@ export class GameScene extends Phaser.Scene {
         const w = this.scale.width;
         const keys = ['meteor1', 'meteor2', 'meteor3', 'meteor4'];
         const m = this.meteors.create(Phaser.Math.Between(30, w - 30), -60, keys[Phaser.Math.Between(0, 3)]) as Phaser.Physics.Arcade.Sprite;
-        m.setScale(0.35 + Math.random() * 0.3).setDepth(3);
+        m.setScale((0.35 + Math.random() * 0.3) * this.entScale).setDepth(3);
         m.setVelocity(Phaser.Math.Between(-40, 40), Phaser.Math.Between(50, 110));
         m.setAngularVelocity(Phaser.Math.Between(-60, 60));
     }
@@ -672,19 +789,21 @@ export class GameScene extends Phaser.Scene {
         if (this.keys.D?.isDown || this.keys.RIGHT?.isDown) kx += 1;
         if (this.keys.W?.isDown || this.keys.UP?.isDown) ky -= 1;
         if (this.keys.S?.isDown || this.keys.DOWN?.isDown) ky += 1;
+        const steering = this.steerPointer !== -1;
         if (kx !== 0 || ky !== 0) {
             const len = Math.hypot(kx, ky);
             body.velocity.x = Phaser.Math.Linear(body.velocity.x, (kx / len) * 430, 0.35);
             body.velocity.y = Phaser.Math.Linear(body.velocity.y, (ky / len) * 430, 0.35);
-        } else if (!this.input.activePointer.isDown) {
+        } else if (!steering) {
             body.velocity.x *= 0.9;
             body.velocity.y *= 0.9;
         }
         // Banking tilt
         this.player.setAngle(Phaser.Math.Clamp(body.velocity.x * 0.03, -18, 18));
 
-        // ─── Player fire (hold pointer or SPACE) ───
-        const firing = this.input.activePointer.isDown || this.keys.SPACE?.isDown;
+        // ─── Player fire ───
+        // Hold the screen / SPACE / on-screen FIRE. Touch auto-fires while dragging.
+        const firing = this.touchFire || this.keys.SPACE?.isDown || (this.steerPointer !== -1);
         if (firing && time > this.lastFired) {
             // Player faction color: gun matches the ship.
             const tint = this.theme.bulletPlayer;
@@ -706,6 +825,7 @@ export class GameScene extends Phaser.Scene {
         const interval = Math.min(500, DIFF_PLAY[this.difficulty].cadence + load * 12);
         if (this.decisionTimer >= interval) {
             this.decisionTimer = 0;
+            this.lastCadence = interval;
             void this.querySystemOneModel();
         }
 
@@ -885,6 +1005,7 @@ export class GameScene extends Phaser.Scene {
             if (typeof scalar?.n === 'number') enemy.setData('shootN', scalar.n);
             if (move?.c) {
                 data.activeIntent = move.c;
+                this.recordDecision(move.conf ?? 0.5);
                 this.events.emit('decision_made', {
                     id: enemy.name, x: enemy.x, y: enemy.y,
                     action: move.c, confidence: move.conf ?? 0.5,
@@ -894,12 +1015,28 @@ export class GameScene extends Phaser.Scene {
         });
     }
 
-    private applyLocalBrain(state: { p: number[]; e: unknown[][]; proj: number; noise: number }, elapsedMs: number) {
-        const s = {
+    private recordDecision(conf: number) {
+        this.decisionCount++;
+        this.confSum += conf;
+        this.confN++;
+        if (this.confN > 400) { // rolling window so "avg confidence" stays live
+            this.confSum *= 0.5;
+            this.confN = Math.floor(this.confN * 0.5);
+        }
+    }
+
+    private buildBrainState(state: { p: number[]; e: unknown[][]; proj: number; noise: number }): BrainState {
+        const bs: BrainState = {
             px: state.p[0], py: state.p[1], php01: state.p[2],
             enemies: (state.e as [string, number, number, number][]).map((r) => ({ id: String(r[0]), x: r[1], y: r[2], hp01: r[3] })),
             projCount: state.proj, noise: state.noise
         };
+        this.brainState = bs;
+        return bs;
+    }
+
+    private applyLocalBrain(state: { p: number[]; e: unknown[][]; proj: number; noise: number }, elapsedMs: number) {
+        const s = this.buildBrainState(state);
         this.events.emit('decision_latency', { ms: Math.round(elapsedMs * 10) / 10, source: 'local-twin' });
         this.enemies.getChildren().forEach((e) => {
             const enemy = e as Phaser.Physics.Arcade.Sprite;
@@ -908,6 +1045,7 @@ export class GameScene extends Phaser.Scene {
             const r = scoreOptions(enemy.name, MOVE_OPTS, s, DIFF_AI[this.difficulty].gain);
             enemy.setData('shootN', shootUrgency(enemy.name, s));
             data.activeIntent = r.choice;
+            this.recordDecision(r.conf);
             this.events.emit('decision_made', {
                 id: enemy.name, x: enemy.x, y: enemy.y,
                 action: r.choice, confidence: r.conf,
