@@ -4,8 +4,9 @@
 > showcase proving that real-time game AI can run as probabilistic inference —
 > on-device, at 60 FPS, with every belief rendered overhead.
 
-🎮 **Play it now:** `https://<your-username>.github.io/<your-repo>/`
-_(replace with your Pages URL after enabling Pages — see Deployment)_
+🎮 **Play it now:** `https://muxd22-alt.github.io/kessler-protocol/`
+_(if it 404s, enable Pages once: repo **Settings → Pages → Source: GitHub Actions**,
+then re-run the **Deploy demo** workflow)_
 
 No install, no backend: the hosted demo runs on the built-in **local heuristic
 twin**. For live server inference, run the backend locally (one command).
@@ -138,7 +139,7 @@ to `main` typechecks, builds, and publishes `client/dist`.
 1. Push to GitHub, then open **Settings → Pages → Build and deployment →
    Source: GitHub Actions**.
 2. Push to `main` (or **Actions → Deploy demo → Run workflow**). Your game is
-   live at `https://<you>.github.io/<repo>/`.
+   live at `https://muxd22-alt.github.io/kessler-protocol/`.
 3. Put that URL at the top of this README.
 
 The build uses relative asset paths (`base: './'`), so forks, project pages,
