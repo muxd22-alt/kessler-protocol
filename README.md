@@ -145,6 +145,37 @@ to `main` typechecks, builds, and publishes `client/dist`.
 The build uses relative asset paths (`base: './'`), so forks, project pages,
 and custom domains all work. The hosted build auto-runs the local twin.
 
+### Performance & hosting notes
+
+Measured on the deployed Pages build:
+
+| Layer | Raw | Gzip (what users download) |
+|---|---|---|
+| `phaser-*.js` (engine, cached forever) | 1.19 MB | **~310 KB** |
+| `index-*.js` (all game code + AI) | 50 KB | **~16 KB** |
+
+What we do to get there:
+
+- **Starfield is baked, not redrawn.** Every layer is rendered once into a
+  texture and scrolled with a `TileSprite` — ~3 draw calls per frame instead of
+  ~265 per-frame circles (the single biggest mobile-CPU win). A dozen live
+  twinklers keep it breathing.
+- **Colliders are registered once.** Meteor-vs-enemy overlap used to be
+  *created every frame* — a real leak; now a persistent collider.
+- **No per-frame allocations.** Enemy/bullet lists are snapshotted once per
+  group per frame instead of repeatedly; the HUD takes one entity snapshot for
+  both its counter and overlays.
+- **Engine split from game code** (`manualChunks`) so Phaser downloads in
+  parallel and stays cached while game code updates.
+- **Terser, 2 compress passes**, console/debugger stripped; chunk warning gone.
+- **Fixed 60 FPS physics**, `powerPreference: 'high-performance'`.
+- **Installable PWA**: `manifest.webmanifest` + SVG icon → "Add to Home Screen"
+  gives a fullscreen, standalone game.
+- `client/public/_headers` sets 1-year immutable caching for fingerprinted
+  assets. Note: GitHub only honors `_headers` once you attach a **custom
+  domain**; on the default `*.github.io` host GitHub serves its own 10-minute
+  cache (gzip is applied either way, as shown above).
+
 ## 7. Project layout
 
 ```
