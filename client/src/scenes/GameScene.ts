@@ -1,5 +1,7 @@
 import * as Phaser from 'phaser';
-import { scoreOptions, shootUrgency, DIFF_AI, type Difficulty, type BrainState } from '../ai/localBrain';
+import { DIFF_AI, type Difficulty, type BrainState } from '../ai/localBrain';
+import { brainDecide, brainShoot, brainFeatures, BRAIN_INFO } from '../ai/tinyBrain';
+import { ppoDecide } from '../ai/ppoBrain';
 import { Sfx } from '../fx/sfx';
 import { fetchTheme, themeFromSeed, serverEnabled, type Theme } from '../fx/theme';
 import { entityScale, resetSafeArea } from '../ui/safeArea';
@@ -78,6 +80,7 @@ export class GameScene extends Phaser.Scene {
 
     // ── Showcase stats ──
     private decisionCount = 0;
+    brainKind: 'tiny' | 'ppo' = 'tiny';
     private confSum = 0;
     private confN = 0;
     private brainState: BrainState | null = null;
@@ -227,6 +230,10 @@ export class GameScene extends Phaser.Scene {
         this.events.on('hud:pause', () => this.togglePause());
         this.events.on('hud:remix', () => this.remixTheme());
         this.events.on('hud:difficulty', (d: Difficulty) => this.setDifficulty(d));
+        this.events.on('hud:brain', (kind: 'tiny' | 'ppo') => {
+            this.brainKind = kind;
+            this.events.emit('brain_changed', kind);
+        });
         this.events.on('hud:control_mode', (m: ControlMode) => this.setControlMode(m));
         this.events.on('hud:fire', (down: boolean) => { this.touchFire = down; });
         this.events.on('hud:emp_touch', () => this.fireEMP());
@@ -384,12 +391,14 @@ export class GameScene extends Phaser.Scene {
 
     getAiStats() {
         return {
-            engine: this.aiOnline === true ? 'server / llama.cpp-ready' : 'local twin (in-browser)',
+            engine: this.aiOnline === true ? 'server / llama.cpp-ready' : (this.brainKind === 'ppo' ? 'local twin (PPO student)' : 'local twin (46B)'),
             decisions: this.decisionCount,
             avgConf: this.confN > 0 ? this.confSum / this.confN : 0,
             entities: this.enemies ? this.enemies.getLength() : 0,
             cadence: Math.round(this.lastCadence),
-            difficulty: this.difficulty
+            difficulty: this.difficulty,
+            brain: this.brainKind,
+            brainBytes: this.brainKind === 'ppo' ? 246 : BRAIN_INFO.bytes
         };
     }
 
@@ -1037,19 +1046,35 @@ export class GameScene extends Phaser.Scene {
 
     private applyLocalBrain(state: { p: number[]; e: unknown[][]; proj: number; noise: number }, elapsedMs: number) {
         const s = this.buildBrainState(state);
-        this.events.emit('decision_latency', { ms: Math.round(elapsedMs * 10) / 10, source: 'local-twin' });
+        this.events.emit('decision_latency', { ms: Math.round(elapsedMs * 10) / 10, source: this.brainKind === 'ppo' ? 'ppo' : 'local-twin' });
         this.enemies.getChildren().forEach((e) => {
             const enemy = e as Phaser.Physics.Arcade.Sprite;
             const data = enemy.getData('ai') as EnemyData;
             if (!data) return;
-            const r = scoreOptions(enemy.name, MOVE_OPTS, s, DIFF_AI[this.difficulty].gain);
-            enemy.setData('shootN', shootUrgency(enemy.name, s));
-            data.activeIntent = r.choice;
-            this.recordDecision(r.conf);
+            const f = brainFeatures(s, enemy.name);
+            let choice: string;
+            let conf: number;
+            let probs: Record<string, number>;
+            if (this.brainKind === 'ppo') {
+                // The PPO student: same 8 features, 246 trained parameters.
+                const out = ppoDecide(f);
+                const labels = MOVE_OPTS;
+                choice = labels[out.choice] ?? 'adv';
+                probs = {};
+                out.probs.forEach((p, i) => { probs[labels[i]] = +p.toFixed(4); });
+                conf = out.probs[out.choice];
+            } else {
+                // The shipped brain: 46 bytes of int8 weights.
+                const d = brainDecide(f, DIFF_AI[this.difficulty].gain, state.noise);
+                choice = d.choice; conf = d.conf; probs = d.probs;
+            }
+            enemy.setData('shootN', brainShoot(f, state.noise));
+            data.activeIntent = choice;
+            this.recordDecision(conf);
             this.events.emit('decision_made', {
                 id: enemy.name, x: enemy.x, y: enemy.y,
-                action: r.choice, confidence: r.conf,
-                probabilities: r.probs, type: data.type, elite: data.elite
+                action: choice, confidence: conf,
+                probabilities: probs, type: data.type, elite: data.elite
             });
         });
     }

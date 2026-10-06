@@ -87,7 +87,103 @@ confidence, agents per batch, cadence) and a **"why it chose"** readout showing
 the signed drivers behind the most confident agent's decision — proximity, own
 hull, threat density, flank bias, player hull.
 
-## 3. Features
+## 3. The smallest decision system we could build (46 bytes)
+
+We stopped asking "how do we make this bigger and smarter" and asked
+**"how small can a decision system be before it stops being one?"**
+
+**Observation.** Everything the enemy needs to pick one of five intents fits in
+**8 numbers**: `bias, far, tent_hi, tent_lo, hurt, danger, pweak, sideC`.
+
+**The trick.** Our analytic policy turned out to be *exactly linear* in that
+basis. Softmax only cares about logits up to an additive constant, so if we can
+reproduce the logits we reproduce the probabilities **exactly**. That means no
+SGD, no framework, no network — just a least-squares solve for the weights,
+then int8 quantisation:
+
+```
+5 intents × 8 features = 40 weights  +  2 for the shoot-urgency scalar
++ 1 float32 dequantisation scale                    = 46 bytes total
+```
+
+Regenerate and verify any time (`python train_brain.py`):
+
+| Metric | Result |
+|---|---|
+| Argmax agreement with the analytic teacher | **99.5 %** |
+| Mean probability error | **0.0007** |
+| Max probability error | 0.012 |
+| Calibration drift vs teacher | **0.0000** |
+| Runtime policy size | **46 bytes** |
+
+Inference is ~40 multiply-adds plus a 5-way softmax.
+
+### 4.1 Bake-off: 46 bytes vs pure-Python PPO
+
+Because a single scalar makes any comparison a strawman, we scored everything
+with a **pre-registered multi-objective fitness** (`server/fitness.py`), fixed
+*before* any student was evaluated:
+
+```
+Fitness = 0.35·(THRUP/THRUP_max) + 0.40·(PROG/PROG_max) + 0.25·(RETAIN/RETAIN_max)
+          − 0.15·Var(THRUP, PROG, RETAIN)
+```
+
+- **THRUP** — damage throughput, log-compressed (`log1p`) so dps-padding stops paying.
+- **PROG** — objective completion as a *continuous* fraction of the player's hull removed, not a binary win flag, so incremental progress counts even in losses.
+- **RETAIN** — retention: fraction of the enemy's own hull left.
+- Each axis is normalised by the specialist constant that maximises it (STRF / ADV / RET), so the three specialists each score ~1.0 on one axis only.
+- **Survival floor 0.20** disqualifies "suicidal high-damage loops" outright.
+- The **variance penalty** is what forces versatility: a specialist pays for being one-dimensional.
+
+The teacher's four logit biases were then tuned against *that* fitness
+(`tune_teacher.py`, 72 postures × 40 seeds) and frozen before the students ran.
+
+Measured in a headless arena (`server/sim.py`), 200 identical seeds:
+
+| Policy | Fitness | Thrup | Prog | Retain | Var | Win | Damage | Policy size |
+|---|---|---|---|---|---|---|---|---|
+| **utility-46B (shipped)** | **+0.7512** | 1.11 | 0.82 | 0.22 | 0.136 | **64 %** | **57.3** | **46 B** |
+| ppo-mlp (246 params) | +0.1814 | 0.00 | 0.00 | 0.81 | 0.147 | 0 % | 0.0 | 984 B (246 B int8) |
+| ppo-linear (54 params) | +0.1814 | 0.00 | 0.00 | 0.81 | 0.147 | 0 % | 0.0 | 216 B (54 B int8) |
+| constant RET | +0.1814 | 0.00 | 0.00 | 0.81 | 0.138 | 0 % | 0.0 | 0 B |
+| random | +0.1134 | 0.02 | 0.02 | 0.42 | 0.036 | 0 % | 1.2 | 0 B |
+| constant STRF | **disqualified** | 0.74 | 0.59 | 0.02 | 0.097 | 21 % | 41.5 | 0 B |
+| constant ADV | **disqualified** | 1.33 | 0.95 | 0.18 | 0.231 | 81 % | 66.7 | 0 B |
+
+What this actually shows, stated plainly:
+
+1. **The survival floor works.** Both aggressive specialists — the ones that
+   win the most fights — are *disqualified* for dying doing it. Without that
+   floor, "always ADVANCE" would have won the table and taught us nothing.
+2. **The 46-byte policy beats every specialist** because it is the only agent
+   that damages, progresses *and* retains. Hand-designed, 46 bytes, zero
+   training pipeline.
+3. **Both PPO students collapsed into "always retreat"** — identical metrics,
+   0 damage. The pure-Python PPO (54 and 246 params, 768k env steps) found the
+   camping optimum and got stuck. *Honest caveat:* this is our from-scratch
+   stdlib PPO, not a tuned numpy/vectorised one; a properly tuned RL setup could
+   close some of that gap. We report what we measured rather than what would be
+   convenient.
+4. **The PPO students are also 5×–21× larger** for strictly worse behaviour.
+
+**Try it live:** open the ⚙ stress lab and press `🧠 Brain:` to swap between
+`46 BYTES` and `PPO 246 par`. Watch the PPO enemies refuse to close in.
+
+Reproduce the whole pipeline:
+
+```bash
+cd server
+python tune_teacher.py   # freeze teacher posture against the fitness
+python train_brain.py    # derive + verify the 46-byte policy
+python train_ppo.py      # pure-python PPO (no numpy/torch)
+python bake_off.py       # the table above -> bake_off.json
+```
+
+Everything is stdlib-only Python. The shipped client ships **zero** ML
+dependencies — just the generated weights file.
+
+## 4. Features
 
 | System | What it does |
 |---|---|
@@ -112,7 +208,7 @@ hull, threat density, flank bias, player hull.
   stress lab. All pads respect notch/punch-hole safe areas and reposition on
   rotation, fold or windowed mode.
 
-## 4. Quickstart
+## 5. Quickstart
 
 ### A. Just play (hosted demo)
 Open the Pages link above. It auto-detects "no local backend" and runs the
@@ -153,7 +249,7 @@ python benchmark.py          # over HTTP against a running server
 | Frame rate | 60 FPS | decoupled loop, zero AI stalls |
 | Fallback triggers | 0% | GBNF-pinned schema |
 
-## 5. The decision API (for hackers)
+## 6. The decision API (for hackers)
 
 Base `http://127.0.0.1:8088`:
 
@@ -173,7 +269,7 @@ With a real model drop `decider-2b-q4_k_m.gguf` into `server/models/` (see
 the server picks it up automatically with a GBNF grammar pinning the answer
 schema; otherwise the heuristic twin serves transparently (labelled).
 
-## 6. Assets — all free, all credited
+## 7. Assets — all free, all credited
 
 All art is **[Kenney Space Shooter Redux/Extension (CC0)](https://kenney.nl/assets/space-shooter-redux)** —
 ships, missiles, meteors, effects, station parts live in
@@ -182,7 +278,7 @@ procedurally generated at runtime — the repo ships zero binary blobs beyond
 the Kenney PNGs. `client/public/assets/download_assets.py` documents the
 original fetch recipe.
 
-## 7. Deployment (GitHub Pages — free, automatic)
+## 8. Deployment (GitHub Pages — free, automatic)
 
 This repo ships a Pages workflow (`.github/workflows/pages.yml`): every push
 to `main` typechecks, builds, and publishes `client/dist`.
@@ -227,22 +323,32 @@ What we do to get there:
   domain**; on the default `*.github.io` host GitHub serves its own 10-minute
   cache (gzip is applied either way, as shown above).
 
-## 8. Project layout
+## 9. Project layout
 
 ```
 kessler_protocol/
 ├── client/                  # Phaser 3 + TypeScript + Vite (+ Capacitor for APK)
 │   ├── src/
-│   │   ├── scenes/          # Boot (loader) · Game (sim) · HUD (telemetry/menus/panels)
-│   │   ├── ai/localBrain.ts # TS twin of the server brain + DIFF_AI presets
-│   │   ├── ai/              # …+ explainFactors(): signed "why it chose" drivers
+│   │   ├── scenes/          # Boot (loader) · Game (sim) · HUD (telemetry/panels)
+│   │   ├── ai/
+│   │   │   ├── tinyBrain.ts          # 46-byte policy inference (~40 MACs)
+│   │   │   ├── tinyBrainWeights.ts   # GENERATED - 42 int8 weights + scale
+│   │   │   ├── ppoBrain.ts           # the PPO students, for the live A/B
+│   │   │   ├── ppoMlpWeights.ts      # GENERATED by server/train_ppo.py
+│   │   │   └── localBrain.ts         # DIFF_AI presets + explainFactors()
 │   │   ├── fx/              # theme.ts (seed looks + serverEnabled) · sfx.ts
 │   │   └── ui/safeArea.ts   # notch/foldable insets + responsive UI/entity scales
 │   └── public/assets/       # Kenney CC0 art
-├── server/                  # FastAPI decision bridge
-│   ├── main.py              # heuristic brain · DIFF_PRESETS · /v1/* · benchmark
-│   ├── benchmark.py         # HTTP benchmark against a live server
-│   └── download_model.py    # fetch decider-2b GGUF into server/models/
+├── server/                  # stdlib-only Python, no ML dependencies
+│   ├── brain.py             # features · analytic teacher · 46-byte policy runtime
+│   ├── fitness.py           # pre-registered multi-objective fitness
+│   ├── sim.py               # headless arena (mirrors GameScene dynamics)
+│   ├── tune_teacher.py      # freeze teacher posture against the fitness
+│   ├── train_brain.py       # closed-form LS -> 46-byte policy (+ verification)
+│   ├── train_ppo.py         # pure-python PPO (no numpy/torch)
+│   ├── bake_off.py          # the head-to-head table
+│   ├── main.py              # FastAPI bridge: /v1/systemone · /v1/theme · /health
+│   └── benchmark.py         # HTTP benchmark against a live server
 └── .github/workflows/       # pages.yml — build + deploy the demo
 ```
 
@@ -250,7 +356,7 @@ Mobile tiers: **Tier 1** (this repo) desktop Python bridge · **Tier 2** pure
 mobile web via the local twin — already how Pages runs · **Tier 3** native
 APK via the included Capacitor config (`npx cap add android && npx cap sync`).
 
-## 9. License
+## 10. License
 
 Code: Apache 2.0 (see `LICENSE`). Art: CC0 by Kenney — thanks for the pixels.
 PRs welcome: new intents, new moods, better calibration plots.

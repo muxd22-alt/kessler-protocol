@@ -1,0 +1,39 @@
+{
+  "tune": {
+    "adv": 0.3,
+    "strf": -0.3,
+    "ret": 0.45,
+    "flk": -0.15
+  },
+  "fitness": 0.7507,
+  "constants": {
+    "w_damage": 0.35,
+    "w_win": 0.4,
+    "w_survival": 0.25,
+    "lambda_var": 0.15,
+    "survival_floor": 0.2
+  },
+  "search": {
+    "adv": [
+      -0.3,
+      0.0,
+      0.3
+    ],
+    "strf": [
+      -0.3,
+      0.0,
+      0.3,
+      0.6
+    ],
+    "ret": [
+      -0.45,
+      0.0,
+      0.45
+    ],
+    "flk": [
+      -0.15,
+      0.0
+    ]
+  },
+  "tuning_seeds": 40
+}

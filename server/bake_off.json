@@ -1,0 +1,120 @@
+{
+  "seeds": 200,
+  "fitness_constants": {
+    "w_damage": 0.35,
+    "w_win": 0.4,
+    "w_survival": 0.25,
+    "lambda_var": 0.15,
+    "survival_floor": 0.2
+  },
+  "tiny_brain": {
+    "bytes": 46,
+    "agreement": 0.995,
+    "max_prob_error": 0.01228
+  },
+  "ppo_mlp_params": 246,
+  "ppo_linear_params": 54,
+  "results": [
+    {
+      "thrup": 1.1085,
+      "prog": 0.819,
+      "retain": 0.2239,
+      "variance": 0.13563,
+      "fitness": 0.7512,
+      "disqualified": false,
+      "win_rate": 0.64,
+      "mean_damage": 57.33,
+      "mean_retention": 0.2181,
+      "name": "utility-46B (ours)",
+      "bytes_f32": 46,
+      "bytes_int8": 46,
+      "latency_us": 14.07
+    },
+    {
+      "thrup": 0.0,
+      "prog": 0.0,
+      "retain": 0.8141,
+      "variance": 0.14729,
+      "fitness": 0.1814,
+      "disqualified": false,
+      "win_rate": 0.0,
+      "mean_damage": 0.0,
+      "mean_retention": 0.8121,
+      "name": "ppo-linear",
+      "bytes_f32": 216,
+      "bytes_int8": 54,
+      "latency_us": 7.55
+    },
+    {
+      "thrup": 0.0,
+      "prog": 0.0,
+      "retain": 0.8141,
+      "variance": 0.14729,
+      "fitness": 0.1814,
+      "disqualified": false,
+      "win_rate": 0.0,
+      "mean_damage": 0.0,
+      "mean_retention": 0.8121,
+      "name": "ppo-mlp",
+      "bytes_f32": 984,
+      "bytes_int8": 246,
+      "latency_us": 14.32
+    },
+    {
+      "thrup": 0.7366,
+      "prog": 0.593,
+      "retain": 0.0168,
+      "variance": 0.09676,
+      "fitness": -1.0,
+      "disqualified": true,
+      "win_rate": 0.21,
+      "mean_damage": 41.51,
+      "mean_retention": -0.0245,
+      "name": "constant STRF",
+      "bytes_f32": 0,
+      "bytes_int8": 0
+    },
+    {
+      "thrup": 1.3322,
+      "prog": 0.953,
+      "retain": 0.1764,
+      "variance": 0.23143,
+      "fitness": -1.0,
+      "disqualified": true,
+      "win_rate": 0.81,
+      "mean_damage": 66.71,
+      "mean_retention": 0.1656,
+      "name": "constant ADV",
+      "bytes_f32": 0,
+      "bytes_int8": 0
+    },
+    {
+      "thrup": 0.0,
+      "prog": 0.0,
+      "retain": 0.8141,
+      "variance": 0.14729,
+      "fitness": 0.1814,
+      "disqualified": false,
+      "win_rate": 0.0,
+      "mean_damage": 0.0,
+      "mean_retention": 0.8121,
+      "name": "constant RET",
+      "bytes_f32": 0,
+      "bytes_int8": 0
+    },
+    {
+      "thrup": 0.0195,
+      "prog": 0.017,
+      "retain": 0.4205,
+      "variance": 0.03595,
+      "fitness": 0.1134,
+      "disqualified": false,
+      "win_rate": 0.0,
+      "mean_damage": 1.19,
+      "mean_retention": 0.418,
+      "name": "random",
+      "bytes_f32": 0,
+      "bytes_int8": 0
+    }
+  ]
+}

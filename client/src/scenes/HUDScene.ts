@@ -1,6 +1,7 @@
 import * as Phaser from 'phaser';
 import type { GameScene } from './GameScene';
 import { explainFactors, type Factor } from '../ai/localBrain';
+import { BRAIN_INFO } from '../ai/tinyBrain';
 import { safeArea, uiScale } from '../ui/safeArea';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -33,11 +34,22 @@ interface Overlay {
 }
 
 const SYS_CAPS = [
+    `Policy = ${BRAIN_INFO.bytes} BYTES (${BRAIN_INFO.weights} int8 weights + 1 f32)`,
+    'Derived in CLOSED FORM — no SGD, no framework, no LLM',
+    `Verified: ${(BRAIN_INFO.agreement * 100).toFixed(1)}% agreement, drift ${BRAIN_INFO.calibrationDrift.toFixed(4)}`,
     'Strategic intent @90-300ms · steering @60fps',
-    'Full probability distribution per agent',
     'Uncertainty aware — EMP makes beliefs flicker',
     'Difficulty = brain params, not stat inflation',
     'One seed generates the entire visual identity'
+];
+
+// Measured by server/bake_off.py (200 seeds, pre-registered fitness).
+const SYS_BAKEOFF = [
+    ['46B ours (ours)', 'fitness +0.751 · 64% win · 57 dmg · 46 B'],
+    ['ppo-mlp 246 par', 'fitness +0.181 · 0% win · 0 dmg · 984 B'],
+    ['ppo-linear 54 par', 'fitness +0.181 · 0% win · 0 dmg · 216 B'],
+    ['constant ADV', 'DISQUALIFIED (survival floor)'],
+    ['constant STRF', 'DISQUALIFIED (survival floor)']
 ];
 
 const SYS_DIFFS = [
@@ -417,6 +429,14 @@ export class HUDScene extends Phaser.Scene {
             const next = this.gs.controlMode === 'touch' ? 'keys' : 'touch';
             this.gs.events.emit('hud:control_mode', next);
             this.pushFeed(`CONTROLS: ${next.toUpperCase()} mode`, 0.5);
+        }); by += 40;
+        this.makeBtn(this.godPanel, by, `🧠  Brain: ${this.gs.brainKind === 'ppo' ? 'PPO 246 par' : '46 BYTES'}`, () => {
+            const next = this.gs.brainKind === 'ppo' ? 'tiny' : 'ppo';
+            this.gs.events.emit('hud:brain', next);
+            this.pushFeed(next === 'ppo'
+                ? 'BRAIN: PPO student (246 params) — watch it fail to close in'
+                : 'BRAIN: 46-byte closed-form policy', 0.5);
+            this.layout();
         });
     }
 
@@ -433,6 +453,9 @@ export class HUDScene extends Phaser.Scene {
         };
         mk('CAPABILITIES', 10, '#7eb8ff');
         SYS_CAPS.forEach((c) => mk(`· ${c}`, 9, '#aabbdd'));
+        y += 6;
+        mk('BAKE-OFF vs PPO · 200 seeds', 10, '#51e08c');
+        SYS_BAKEOFF.forEach(([a, b]) => mk(`${a}\n   ${b}`, 9, '#aabbdd'));
         y += 6;
         mk('VERSUS CLASSIC GAME AI', 10, '#7eb8ff');
         SYS_DIFFS.forEach(([a, b]) => mk(`${a}\n   ${b}`, 9, '#aabbdd'));
