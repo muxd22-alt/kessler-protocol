@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+client/dist/
+server/.venv/
+__pycache__/
+*.py[cod]
+
+# Env / secrets
+.env
+*.pem
+*.key
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Capacitor native build outputs (platform sources ARE committed)
+client/android/app/build/
+client/android/.gradle/
+client/android/local.properties
+client/ios/
+
+# Misc
+*.log
+dist/
+build/

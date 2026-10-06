@@ -1,0 +1,9 @@
+# Core (required for Tier 1 demo)
+fastapi>=0.109
+uvicorn>=0.27
+pydantic>=2.5
+
+# Optional — only needed for real local LLM inference (Tier 1 full):
+#   pip install llama-cpp-python huggingface-hub
+# llama-cpp-python
+# huggingface-hub
