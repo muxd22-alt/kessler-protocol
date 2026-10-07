@@ -8,6 +8,8 @@ export type BrainKind = 'tiny' | 'kb1k' | 'ppo';
 import { Sfx } from '../fx/sfx';
 import { fetchTheme, themeFromSeed, serverEnabled, type Theme } from '../fx/theme';
 import { entityScale, resetSafeArea } from '../ui/safeArea';
+import { gravityAt, inRock, ARENA_W, ARENA_H, type Arena } from '../sim/arena';
+import { seedFromLocation, loadArena, newSeed, isHeldOut } from '../sim/seeds';
 
 export type GamePhase = 'menu' | 'playing' | 'paused' | 'over';
 export type ControlMode = 'auto' | 'touch' | 'keys';
@@ -87,6 +89,10 @@ export class GameScene extends Phaser.Scene {
     private uiRects: { x: number; y: number; w: number; h: number }[] = [];
     private touchFire = false;
     private entScale = 1;
+    private arena!: Arena;
+    private arenaSeed = 0;
+    private arenaSeen = false;
+    private pulsarT = 0;
 
     // ── Showcase stats ──
     private decisionCount = 0;
@@ -136,6 +142,20 @@ export class GameScene extends Phaser.Scene {
         // Graphics must exist before the starfield bakes into them.
         this.twinkleGfx = this.add.graphics().setDepth(-10);
         this.overlayGfx = this.add.graphics().setDepth(6);
+
+        // ─── Procedural arena (seeded, point-symmetric) ───
+        const s0 = seedFromLocation();
+        const loaded = loadArena(s0.seed);
+        this.arena = loaded.arena;
+        this.arenaSeed = this.arena.seed;
+        this.arenaSeen = loaded.seen;
+        this.buildArena();
+        const seeded = {
+            seed: this.arenaSeed, hash: this.arena.hash, seen: this.arenaSeen,
+            heldOut: isHeldOut(this.arenaSeed), mutators: this.arena.mutators
+        };
+        this.events.emit('arena_changed', seeded);
+
         this.buildStarfield();
         this.buildNebulas();
         void this.loadTheme(); // ask the LLM side for a look-from-a-number
@@ -249,6 +269,8 @@ export class GameScene extends Phaser.Scene {
         this.events.on('hud:restart', () => this.restart());
         this.events.on('hud:pause', () => this.togglePause());
         this.events.on('hud:remix', () => this.remixTheme());
+        this.events.on('hud:newseed', () => this.regenerateArena());
+        this.events.on('hud:seed', (s: number) => this.regenerateArena(s));
         this.events.on('hud:difficulty', (d: Difficulty) => this.setDifficulty(d));
         this.events.on('hud:brain', (kind: BrainKind) => {
             this.brainKind = kind;
@@ -547,6 +569,150 @@ export class GameScene extends Phaser.Scene {
                 this.aiOnline = false;
                 this.events.emit('ai_status', false);
             }
+        }
+    }
+
+        // ─── Procedural arena ───
+    /** Draw wells, rocks, wormholes and the pulsar ring. Purely visual + hit data. */
+    private buildArena() {
+        const g = this.add.graphics().setDepth(1);
+        this.arenaGfx = g;
+        const toScreen = (wx: number, wy: number) => this.arenaToScreen(wx, wy);
+
+        // gravity wells: concentric pull rings + core
+        for (const w of this.arena.wells) {
+            const p = toScreen(w.x, w.y);
+            const rad = 60 + w.mass / 40;
+            for (let i = 3; i >= 1; i--) {
+                g.lineStyle(1, 0x7eb8ff, 0.10 * i);
+                g.strokeCircle(p.x, p.y, rad * (i / 3));
+            }
+            g.fillStyle(0x7eb8ff, 0.18);
+            g.fillCircle(p.x, p.y, 14 + w.mass / 200);
+            g.lineStyle(1.5, 0xaad8ff, 0.5);
+            g.strokeCircle(p.x, p.y, 14 + w.mass / 200);
+        }
+
+        // rocks: tactical cover
+        for (const r of this.arena.rocks) {
+            const p = toScreen(r.x, r.y);
+            g.fillStyle(0x2a2438, 0.95);
+            g.fillCircle(p.x, p.y, r.r * this.arenaScale());
+            g.lineStyle(1.5, 0x6b5f86, 0.8);
+            g.strokeCircle(p.x, p.y, r.r * this.arenaScale());
+            g.fillStyle(0x3b3350, 0.6);
+            g.fillCircle(p.x - r.r * 0.25, p.y - r.r * 0.25, r.r * 0.35 * this.arenaScale());
+        }
+
+        // wormholes: paired gates
+        for (const h of this.arena.wormholes) {
+            for (const [hx, hy] of [[h.ax, h.ay], [h.bx, h.by]] as [number, number][]) {
+                const p = toScreen(hx, hy);
+                g.lineStyle(2, 0x59f0c9, 0.75);
+                g.strokeCircle(p.x, p.y, 13);
+                g.lineStyle(1, 0x59f0c9, 0.3);
+                g.strokeCircle(p.x, p.y, 20);
+            }
+        }
+
+        // spawn anchors
+        for (const [sx, sy] of this.arena.spawnA) {
+            const p = toScreen(sx, sy);
+            g.lineStyle(1, 0x51e08c, 0.35);
+            g.strokeCircle(p.x, p.y, 22);
+        }
+        for (const [sx, sy] of this.arena.spawnB) {
+            const p = toScreen(sx, sy);
+            g.lineStyle(1, 0xff6b6b, 0.35);
+            g.strokeCircle(p.x, p.y, 22);
+        }
+    }
+
+    private arenaGfx!: Phaser.GameObjects.Graphics;
+    private arenaScale(): number { return Math.max(0.5, Math.min(this.scale.width, this.scale.height) / 900); }
+    /** arena world (1600x1000) -> screen */
+    private arenaToScreen(wx: number, wy: number): { x: number; y: number } {
+        const sx = (wx / ARENA_W) * this.scale.width;
+        const sy = (wy / ARENA_H) * this.scale.height;
+        return { x: sx, y: sy };
+    }
+
+    /** Respawn the player and enemies onto the new arena's spawn anchors. */
+    regenerateArena(seed?: number) {
+        const s = seed ?? newSeed();
+        const loaded = loadArena(s);
+        this.arena = loaded.arena;
+        this.arenaSeed = this.arena.seed;
+        this.arenaSeen = loaded.seen;
+        this.arenaGfx?.destroy();
+        this.buildArena();
+        const a = this.arena.spawnA[0];
+        const p = this.arenaToScreen(a[0], a[1]);
+        this.player.setPosition(p.x, p.y);
+        this.enemies.clear(true, true);
+        this.pulsarT = 0;
+        this.events.emit('arena_changed', {
+            seed: this.arenaSeed, hash: this.arena.hash, seen: this.arenaSeen,
+            heldOut: isHeldOut(this.arenaSeed), mutators: this.arena.mutators
+        });
+    }
+
+    /** Gravity + rocks + pulsar + wormholes applied to one body. */
+    private applyArenaForces(body: Phaser.Physics.Arcade.Body, dt: number) {
+        const w = this.arenaToScreenInv(body.x, body.y);
+        const gv = gravityAt(this.arena, w.x, w.y, 1);
+        body.velocity.x += (gv.ax / ARENA_W) * this.scale.width * dt * 0.0006;
+        body.velocity.y += (gv.ay / ARENA_H) * this.scale.height * dt * 0.0006;
+        // rocks push out
+        const rock = inRock(this.arena, w.x, w.y, 0);
+        if (rock) {
+            const dx = w.x - rock.x, dy = w.y - rock.y;
+            const d = Math.max(1, Math.hypot(dx, dy));
+            body.velocity.x += (dx / d) * 260 * dt;
+            body.velocity.y += (dy / d) * 260 * dt;
+        }
+    }
+
+    private arenaToScreenInv(sx: number, sy: number): { x: number; y: number } {
+        return { x: (sx / this.scale.width) * ARENA_W, y: (sy / this.scale.height) * ARENA_H };
+    }
+
+    private pulsarStep(delta: number) {
+        const p = this.arena.pulsar;
+        if (!p) return;
+        const period = this.arena.mutators.includes('FAST_PULSAR') ? p.period * 0.5 : p.period;
+        this.pulsarT = (this.pulsarT + delta) % period;
+        const phase = this.pulsarT / period;
+        // damage on the rising edge
+        if (phase < delta / period) {
+            const sc = this.arenaToScreen(p.x, p.y);
+            const r = this.arenaScale();
+            for (const u of this.enemies.getChildren()) {
+                const e = u as Phaser.Physics.Arcade.Sprite;
+                if (Math.hypot(e.x - sc.x, e.y - sc.y) < 220 * r) {
+                    const d = e.getData('ai') as EnemyData;
+                    if (d) { d.health -= 1; d.dmgIn += 6; }
+                }
+            }
+        }
+        // ring visual
+        const sc = this.arenaToScreen(p.x, p.y);
+        const rr = (0.25 + phase * 0.75) * 320 * this.arenaScale();
+        this.arenaGfx.lineStyle(2, 0xcc66ff, (1 - phase) * 0.5);
+        this.arenaGfx.strokeCircle(sc.x, sc.y, rr);
+    }
+
+    private wormholeStep() {
+        for (const h of this.arena.wormholes) {
+            const a = this.arenaToScreen(h.ax, h.ay);
+            const b = this.arenaToScreen(h.bx, h.by);
+            if (Math.hypot(this.player.x - a.x, this.player.y - a.y) < 18) {
+                this.player.setPosition(b.x, b.y);
+            }
+            this.enemies.getChildren().forEach((u) => {
+                const e = u as Phaser.Physics.Arcade.Sprite;
+                if (Math.hypot(e.x - a.x, e.y - a.y) < 18) e.setPosition(b.x, b.y);
+            });
         }
     }
 
@@ -849,6 +1015,11 @@ export class GameScene extends Phaser.Scene {
             return;
         }
         if (this.phase !== 'playing') return;
+
+        // ─── Procedural arena dynamics ───
+        this.applyArenaForces(this.player.body as Phaser.Physics.Arcade.Body, delta / 1000);
+        this.pulsarStep(delta);
+        this.wormholeStep();
 
         this.elapsed += delta;
 

@@ -91,6 +91,9 @@ export class HUDScene extends Phaser.Scene {
     private bestText!: Phaser.GameObjects.Text;
     private comboText!: Phaser.GameObjects.Text;
     private themeText!: Phaser.GameObjects.Text;
+    private seedText!: Phaser.GameObjects.Text;
+    private unseenBadge!: Phaser.GameObjects.Text;
+    private arenaInfo!: Phaser.GameObjects.Text;
     private helpText!: Phaser.GameObjects.Text;
 
     // Toggles
@@ -150,8 +153,7 @@ export class HUDScene extends Phaser.Scene {
         this.bestText = this.txt(0, 27, 'BEST 0', 10, '#8a93b8').setOrigin(0.5, 0).setDepth(101);
         this.comboText = this.txt(0, 26, '', 11, '#ffd166').setOrigin(1, 0).setDepth(101);
         this.themeText = this.txt(0, 40, '', 9, '#8a93b8').setOrigin(1, 0).setDepth(101);
-        this.helpText = this.add.text(0, 0, '', {
-            fontSize: '10px', color: '#4d5f7e', fontFamily: '"Inter", monospace',
+        this.helpText = this.add.text(0, 0, '', {            fontSize: '10px', color: '#4d5f7e', fontFamily: '"Inter", monospace',
             backgroundColor: '#00000055', padding: { left: 8, right: 8, top: 3, bottom: 3 }
         }).setOrigin(0.5, 1).setDepth(101).setAlpha(0.95);
 
@@ -169,6 +171,19 @@ export class HUDScene extends Phaser.Scene {
         this.pauseBtn = this.txt(0, 0, '❚❚', 13, '#cfe0ff').setOrigin(0.5).setDepth(102)
             .setInteractive({ useHandCursor: true });
         this.pauseBtn.on('pointerdown', () => this.gs.events.emit('hud:pause_touch'));
+
+        this.seedText = this.txt(0, 0, '', 9, '#8a93b8').setDepth(101);
+        this.unseenBadge = this.add.text(0, 0, '★ UNSEEN MAP', {
+            fontSize: '10px', color: '#0a0a14', backgroundColor: '#ffd166',
+            fontFamily: '"Inter", sans-serif', fontStyle: 'bold',
+            padding: { left: 6, right: 6, top: 3, bottom: 3 }
+        }).setOrigin(0.5).setDepth(102).setVisible(false);
+        this.arenaInfo = this.txt(0, 0, '', 9, '#5a6c8d').setDepth(101).setVisible(false);
+
+        this.shuffleBtn = this.add.text(0, 0, '🎲 shuffle map', {
+            fontSize: '9px', color: '#aabbdd', fontFamily: '"Inter", monospace'
+        }).setOrigin(0, 0).setDepth(102).setInteractive({ useHandCursor: true });
+        this.shuffleBtn.on('pointerdown', () => this.gs.events.emit('hud:newseed'));
 
         this.createTouchPads();
         this.createGodPanel();
@@ -229,6 +244,10 @@ export class HUDScene extends Phaser.Scene {
         // Toggles
         const ty = top + barH + Math.round(14 * s);
         this.sysPill.setPosition(ins.left + 8, ty).setStyle({ fontSize: `${Math.round(11 * s)}px` });
+        this.seedText.setPosition(ins.left + 8, ty + Math.round(24 * s)).setStyle({ fontSize: `${Math.round(9 * s)}px` });
+        this.unseenBadge.setPosition(this.scale.width / 2, H - ins.bottom - Math.round(30 * s));
+        this.arenaInfo.setPosition(W / 2, H - ins.bottom - Math.round(46 * s)).setStyle({ fontSize: `${Math.round(9 * s)}px` });
+        this.shuffleBtn.setPosition(ins.left + 8, ty + Math.round(38 * s)).setStyle({ fontSize: `${Math.round(9 * s)}px` });
         this.gearBtn.setPosition(W - ins.right - Math.round(16 * s), ty).setStyle({ fontSize: `${Math.round(20 * s)}px` });
         this.pauseBtn.setPosition(W - ins.right - Math.round(50 * s), ty).setStyle({ fontSize: `${Math.round(12 * s)}px` });
 
@@ -302,6 +321,8 @@ export class HUDScene extends Phaser.Scene {
         this.empZone.on('pointerdown', () => { this.gs.events.emit('hud:emp_touch'); this.sfxPulse(); });
         this.touchLayer.add([this.fireGfx, this.empGfx, this.fireZone, this.empZone]);
     }
+
+    private shuffleBtn!: Phaser.GameObjects.Text;
 
     private brainIndex(): number {
         return this.gs?.brainKind === 'kb1k' ? 1 : this.gs?.brainKind === 'ppo' ? 2 : 0;
@@ -768,6 +789,17 @@ export class HUDScene extends Phaser.Scene {
             this.layoutTouchPads();
         });
         ev.on('hud:syspanel', () => this.toggleSys());
+        ev.on('arena_changed', (a: { seed: number; hash: number; seen: boolean; heldOut: boolean; mutators: string[] }) => {
+            this.seedText.setText(`#seed=${a.seed} · hash ${a.hash >>> 0}`);
+            // "unseen" means not in the training set OR explicitly held out
+            const unseen = !a.seen;
+            this.unseenBadge.setText(unseen ? (a.heldOut ? '★ HELD-OUT MAP' : '★ UNSEEN MAP') : 'TRAINING MAP');
+            this.unseenBadge.setBackgroundColor(unseen ? (a.heldOut ? '#ffd166' : '#59f0c9') : '#3a4a63');
+            this.unseenBadge.setVisible(true);
+            const m = a.mutators;
+            this.arenaInfo.setText(`wells ${''}mutators: ${m.length ? m.join(' ') : 'none'}`);
+            this.arenaInfo.setVisible(m.length > 0);
+        });
         ev.on('brain_changed', (k: string) => {
             const bytes = k === 'kb1k' ? KB1K_META.payloadBytes : k === 'ppo' ? 246 : BRAIN_INFO.bytes;
             this.themeLabel = this.themeLabel;

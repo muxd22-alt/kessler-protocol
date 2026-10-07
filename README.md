@@ -323,7 +323,104 @@ What we do to get there:
   domain**; on the default `*.github.io` host GitHub serves its own 10-minute
   cache (gzip is applied either way, as shown above).
 
-## 9. Project layout
+## 9. Procedural arenas (one seed, deterministic everywhere)
+
+The strongest addition to the showcase, because it removes the weakness a tiny
+brain always has: **memorising one map**. Every arena descends from one 32-bit
+seed, and the champion is evaluated on seeds it has never seen.
+
+### What a seed generates
+
+| Feature | Rule | Symmetry |
+|---|---|---|
+| **Gravity wells** | 0-2 pairs + 35 % chance of a central one; integer mass 500-2000, integer drift | mirrored pairs, centre self-mirrors |
+| **Asteroid fields** | 1-4 fBm clusters on an integer lattice, thresholded by density (0.10-0.60); rocks are tactical cover | built once, then the finished list is mirrored |
+| **Pulsar** | 50 % chance, centre only, integer period + damage | centre |
+| **Wormholes** | 0-2 crossing pairs | mirrored |
+| **Spawns** | 3 anchors per team, jittered | mirrored |
+| **Mutators** | 0-2 of `DOUBLE_G`, `FAST_PULSAR`, `THIN_HULLS`, `RICH_ASTEROIDS` | n/a |
+
+**Point symmetry is enforced structurally, not checked afterwards.** Every
+feature is emitted either at the centre or as a `(x, y) <-> (W-x, H-y)` pair —
+there is no third code path. An asymmetric map would silently corrupt every
+win rate in this README, and a post-hoc assertion is exactly the kind of thing
+that gets forgotten.
+
+### Determinism rules (load-bearing, not stylistic)
+
+1. All randomness is **PCG32**, an integer generator. No `Math.random()`, no
+   float accumulation of state.
+2. **No `Math.sin`/`fract` hashing.** Those differ between JS engines, Python
+   and C#, and desync *silently*.
+3. Noise corners are **integer lattice hashes**; only the interpolation uses
+   float ops, which are IEEE-754 identical everywhere.
+4. Each arena reduces to an **integer hash**, and golden vectors assert the TS
+   and Python builds agree. A mismatch is a failing test, not a mystery.
+
+```
+$ npm run test:golden       # TS generator vs golden vectors from Python
+       seed       golden           ts  result
+          0   3406941785   3406941785  OK
+         42    1705695246   1705695246  OK
+     48213   2477557360   2477557360  OK
+  2147483647   4116467935   4116467935  OK
+OK: all 10 golden vectors reproduce exactly
+```
+
+Both `pages.yml` and the browser build run this check, so a desync fails CI.
+
+### Map-agnostic features
+
+No feature may reference a named landmark — "distance to well A" is meaningless
+on a generated map. The brain only ever sees the **pull of the nearest well**
+(magnitude + direction, never identity) and **8 fixed ray casts** (clearance in
+each direction). Navigation stays out of the brain: it picks an intent, and
+steering executes it. The policy remains tactical, never a pathfinder.
+
+### Generalisation: train seeds vs held-out seeds
+
+20 training seeds and 20 **reserved** seeds the champion is never tuned on
+(`client/src/sim/seeds.ts`). 3 episodes per seed, seeded 3v3, identical physics;
+team A is the candidate, team B is the 1KB reference.
+
+| Brain | Split | Win | Damage | Retention |
+|---|---|---|---|---|
+| **1KB gated** | train | 0.25 | 261.5 | 0.31 |
+| **1KB gated** | **held-out** | **0.45** | **233.7** | **0.31** |
+| 46B flat | train | 0.02 | 167.5 | 0.09 |
+| 46B flat | held-out | 0.05 | 146.0 | 0.15 |
+
+**The gap is the finding.** The gated brain's throughput barely moves on maps it
+has never seen (0.751 -> 0.792) and retention is *identical* (0.31). It is not
+memorising a map, because a linear-in-basis policy over relative features cannot.
+That is the generalisation claim, measured rather than asserted.
+
+### Try it
+
+- `#seed=48213` in the URL builds that exact arena; the seed and arena hash show
+  under the stress-lab toggle.
+- **?? shuffle map** generates a fresh arena live.
+- The badge reads **TRAINING MAP**, **UNSEEN MAP** or **HELD-OUT MAP**, so a
+  visitor always knows whether they are looking at a tuned map.
+
+### Deferred (deliberately, and in this order)
+
+Not attempted yet, in the order they should be:
+
+1. **3D Kenney Space Kit rendering** — top-down orthographic camera over the
+   flat 2D sim. Kept strictly separate: the headless trainer never loads an
+   asset, and the browser maps entities to models by tag. Needs a GLB
+   optimisation pass (`gltf-transform`) so Pages stays small.
+2. **WFC station assembly** from the station kit grammar — needs a hand-built
+   adjacency ruleset, the fiddliest part of the whole spec.
+3. **Ship variants** with stats in the feature vector so one brain flies all of them.
+4. **Curriculum arena selection** — pick arenas where the champion wins ~50 %.
+
+The arena generator was prototyped first on purpose: everything else sits on top
+of it, and the determinism guarantee is worthless if the map generator itself
+drifts.
+
+## 10. Project layout
 
 ```
 kessler_protocol/
@@ -356,7 +453,8 @@ Mobile tiers: **Tier 1** (this repo) desktop Python bridge Â· **Tier 2** pure
 mobile web via the local twin â€” already how Pages runs Â· **Tier 3** native
 APK via the included Capacitor config (`npx cap add android && npx cap sync`).
 
-## 10. License
+## 11. License
 
 Code: Apache 2.0 (see `LICENSE`). Art: CC0 by Kenney â€” thanks for the pixels.
 PRs welcome: new intents, new moods, better calibration plots.
+

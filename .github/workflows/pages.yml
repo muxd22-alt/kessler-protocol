@@ -42,6 +42,15 @@ jobs:
       - name: Typecheck + build
         run: npm run build
 
+      - name: Determinism golden vectors (TS vs Python)
+        run: |
+          python server/gen_golden.py --check
+          npx esbuild test/golden_arenas.test.ts --bundle --platform=node --format=cjs --outfile=test/.golden.tmp.cjs --log-level=error
+          cd test && node .golden.tmp.cjs
+
+      - name: Arena symmetry audit
+        run: python server/gen_golden.py --check
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

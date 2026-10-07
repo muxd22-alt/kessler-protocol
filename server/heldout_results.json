@@ -1,0 +1,89 @@
+{
+  "episodes_per_seed": 3,
+  "train_seeds": [
+    48213,
+    1337,
+    90210,
+    5,
+    61803,
+    271828,
+    777,
+    424242,
+    31337,
+    161803,
+    8675309,
+    112358,
+    99991,
+    60684,
+    14142,
+    31415,
+    27182,
+    8080,
+    1234567,
+    987654
+  ],
+  "heldout_seeds": [
+    48214,
+    1338,
+    90211,
+    6,
+    61804,
+    271829,
+    778,
+    424243,
+    31338,
+    161804,
+    8675310,
+    112359,
+    99992,
+    60685,
+    14143,
+    31416,
+    27183,
+    8081,
+    1234568,
+    987655
+  ],
+  "results": [
+    {
+      "brain": "1KB gated",
+      "train": {
+        "label": "train",
+        "n": 60,
+        "win_rate": 0.25,
+        "damage": 261.5,
+        "retention": 0.3123,
+        "throughput": 0.7512
+      },
+      "heldout": {
+        "label": "held-out",
+        "n": 60,
+        "win_rate": 0.45,
+        "damage": 233.7,
+        "retention": 0.3101,
+        "throughput": 0.792
+      },
+      "win_gap": 0.2
+    },
+    {
+      "brain": "46B flat",
+      "train": {
+        "label": "train",
+        "n": 60,
+        "win_rate": 0.0167,
+        "damage": 167.5,
+        "retention": 0.0913,
+        "throughput": 0.6974
+      },
+      "heldout": {
+        "label": "held-out",
+        "n": 60,
+        "win_rate": 0.05,
+        "damage": 146.0,
+        "retention": 0.1462,
+        "throughput": 0.9016
+      },
+      "win_gap": 0.0333
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "note": "seed -> arena hash. TS must match; see gen_golden.py --check",
+  "hash_fn": "FNV-1a over integer arena fields, seed 0x4B455353",
+  "vectors": [
+    {
+      "seed": 0,
+      "hash": 3406941785,
+      "wells": 2,
+      "rocks": 2,
+      "pulsar": 0,
+      "wormholes": 2,
+      "mutators": [
+        "DOUBLE_G"
+      ],
+      "asymmetries": 0
+    },
+    {
+      "seed": 1,
+      "hash": 989867287,
+      "wells": 1,
+      "rocks": 0,
+      "pulsar": 1,
+      "wormholes": 2,
+      "mutators": [
+        "FAST_PULSAR"
+      ],
+      "asymmetries": 0
+    },
+    {
+      "seed": 42,
+      "hash": 1705695246,
+      "wells": 3,
+      "rocks": 10,
+      "pulsar": 1,
+      "wormholes": 2,
+      "mutators": [
+        "DOUBLE_G"
+      ],
+      "asymmetries": 0
+    },
+    {
+      "seed": 1337,
+      "hash": 224728070,
+      "wells": 0,
+      "rocks": 2,
+      "pulsar": 1,
+      "wormholes": 2,
+      "mutators": [
+        "DOUBLE_G"
+      ],
+      "asymmetries": 0
+    },
+    {
+      "seed": 48213,
+      "hash": 2477557360,
+      "wells": 1,
+      "rocks": 16,
+      "pulsar": 1,
+      "wormholes": 1,
+      "mutators": [],
+      "asymmetries": 0
+    },
+    {
+      "seed": 99991,
+      "hash": 4259791472,
+      "wells": 0,
+      "rocks": 0,
+      "pulsar": 1,
+      "wormholes": 2,
+      "mutators": [],
+      "asymmetries": 0
+    },
+    {
+      "seed": 2147483647,
+      "hash": 4116467935,
+      "wells": 4,
+      "rocks": 0,
+      "pulsar": 1,
+      "wormholes": 1,
+      "mutators": [
+        "FAST_PULSAR",
+        "DOUBLE_G"
+      ],
+      "asymmetries": 0
+    },
+    {
+      "seed": 31337,
+      "hash": 59065900,
+      "wells": 5,
+      "rocks": 0,
+      "pulsar": 0,
+      "wormholes": 1,
+      "mutators": [],
+      "asymmetries": 0
+    },
+    {
+      "seed": 777,
+      "hash": 4275341018,
+      "wells": 0,
+      "rocks": 4,
+      "pulsar": 1,
+      "wormholes": 1,
+      "mutators": [],
+      "asymmetries": 0
+    },
+    {
+      "seed": 8675309,
+      "hash": 3714497569,
+      "wells": 3,
+      "rocks": 0,
+      "pulsar": 0,
+      "wormholes": 1,
+      "mutators": [
+        "DOUBLE_G"
+      ],
+      "asymmetries": 0
+    }
+  ]
+}
