@@ -22,6 +22,9 @@ client/android/.gradle/
 client/android/local.properties
 client/ios/
 
+# Determinism test bundle (built on demand by npm run test:golden)
+test/.golden.tmp.cjs
+
 # Misc
 *.log
 dist/
