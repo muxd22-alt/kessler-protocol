@@ -1,7 +1,10 @@
 import * as Phaser from 'phaser';
 import { DIFF_AI, type Difficulty, type BrainState } from '../ai/localBrain';
 import { brainDecide, brainShoot, brainFeatures, BRAIN_INFO } from '../ai/tinyBrain';
+import { kb1kDecide, kb1kBasis, kb1kGate, kb1kPressure, kb1kUtilities, TACTIC_INTENT, TACTIC_FIRES, CTX, META as KB1K_META } from '../ai/kb1k';
 import { ppoDecide } from '../ai/ppoBrain';
+
+export type BrainKind = 'tiny' | 'kb1k' | 'ppo';
 import { Sfx } from '../fx/sfx';
 import { fetchTheme, themeFromSeed, serverEnabled, type Theme } from '../fx/theme';
 import { entityScale, resetSafeArea } from '../ui/safeArea';
@@ -24,6 +27,13 @@ interface EnemyData {
     activeIntent: string;
     fireTimer: number;
     seed: number;
+    // ── KB-1K orthogonal context gating state ──
+    ctx: number;
+    ctxTimer: number;
+    dmgIn: number;
+    tactic: number;
+    holdFire: boolean;
+    commit: number;
 }
 
 interface GodConfig { spawnScale: number; speedScale: number; noise: number }
@@ -80,7 +90,9 @@ export class GameScene extends Phaser.Scene {
 
     // ── Showcase stats ──
     private decisionCount = 0;
-    brainKind: 'tiny' | 'ppo' = 'tiny';
+    private ctxMix = [0, 0, 0, 0];
+    private commitCounter = 0;
+    brainKind: BrainKind = 'tiny';
     private confSum = 0;
     private confN = 0;
     private brainState: BrainState | null = null;
@@ -189,6 +201,14 @@ export class GameScene extends Phaser.Scene {
             kb.on('keydown-E', () => this.fireEMP());
             kb.on('keydown-T', () => this.remixTheme());
             kb.on('keydown-I', () => this.events.emit('hud:syspanel'));
+            kb.on('keydown-TAB', () => {
+                // Cycle the decision brain live: 46B -> 1KB gated -> PPO -> 46B
+                const order: BrainKind[] = ['tiny', 'kb1k', 'ppo'];
+                const next = order[(order.indexOf(this.brainKind) + 1) % order.length];
+                this.brainKind = next;
+                this.events.emit('brain_changed', next);
+                this.events.emit('hud:brain_changed', next);
+            });
             kb.on('keydown-M', () => { this.sfx.enabled = !this.sfx.enabled; this.events.emit('sfx_toggle', this.sfx.enabled); });
             kb.on('keydown-R', () => { if (this.phase === 'over') this.restart(); });
             kb.on('keydown-ENTER', () => { if (this.phase === 'menu' || this.phase === 'over') this.startGame(); });
@@ -230,7 +250,7 @@ export class GameScene extends Phaser.Scene {
         this.events.on('hud:pause', () => this.togglePause());
         this.events.on('hud:remix', () => this.remixTheme());
         this.events.on('hud:difficulty', (d: Difficulty) => this.setDifficulty(d));
-        this.events.on('hud:brain', (kind: 'tiny' | 'ppo') => {
+        this.events.on('hud:brain', (kind: BrainKind) => {
             this.brainKind = kind;
             this.events.emit('brain_changed', kind);
         });
@@ -398,8 +418,56 @@ export class GameScene extends Phaser.Scene {
             cadence: Math.round(this.lastCadence),
             difficulty: this.difficulty,
             brain: this.brainKind,
-            brainBytes: this.brainKind === 'ppo' ? 246 : BRAIN_INFO.bytes
+            brainBytes: this.brainKind === 'ppo' ? 246 : this.brainKind === 'kb1k' ? KB1K_META.payloadBytes : BRAIN_INFO.bytes,
+            ctxMix: this.ctxMix.slice()
         };
+    }
+
+    // ─── KB-1K: orthogonal context gating for one enemy ───
+    private kb1kThink(enemy: Phaser.Physics.Arcade.Sprite, data: EnemyData, s: BrainState, noise: number) {
+        const self = s.enemies.find((e) => e.id === enemy.name);
+        if (!self) return;
+        const dSelf = Math.hypot(this.player.x - enemy.x, this.player.y - enemy.y);
+        // "ally support" in a 1-vs-many wave: nearby same-side contacts
+        let support = 0;
+        this.enemies.getChildren().forEach((o) => {
+            const os = o as Phaser.Physics.Arcade.Sprite;
+            if (os !== enemy && Math.hypot(os.x - enemy.x, os.y - enemy.y) < 240) support = 1;
+        });
+        const edge = Math.min(enemy.x, enemy.y, this.scale.width - enemy.x, this.scale.height - enemy.y) / 120;
+        const x = kb1kBasis(
+            dSelf, data.health / data.maxHealth, s.php01,
+            this.player.x - enemy.x, Math.min(this.enemyBullets.getLength() / 6, 1),
+            Math.min(s.projCount / 8, 1), support,
+            Math.max(0, 1 - Math.abs(dSelf - 300) / 300),
+            data.tactic >= 0 && data.tactic < 7, data.commit, Math.max(0, edge)
+        );
+        // pressure -> hard context gate (with hysteresis)
+        const pressure = kb1kPressure(data.dmgIn, s.php01);
+        const g = kb1kGate(pressure, data.ctx, data.ctxTimer, 16);
+        data.ctx = g.ctx;
+        data.ctxTimer = g.timer;
+        this.ctxMix[data.ctx]++;
+        const out = kb1kDecide(x, data.ctx, this.roleOf(data), noise);
+        data.tactic = out.choice;
+        data.activeIntent = TACTIC_INTENT[out.choice];
+        data.holdFire = !TACTIC_FIRES[out.choice];
+        const utils = kb1kUtilities(x);
+        this.recordDecision(out.conf);
+        this.events.emit('decision_made', {
+            id: enemy.name, x: enemy.x, y: enemy.y,
+            action: data.activeIntent, confidence: out.conf,
+            probabilities: {}, type: data.type, elite: data.elite,
+            ctx: data.ctx, tactic: out.choice, utils
+        });
+    }
+
+    /** archetype index from the enemy class — 4 buckets, 48 bytes of prior */
+    private roleOf(data: EnemyData): number {
+        if (data.elite) return 0;
+        if (data.type === 'fighter') return 1;
+        if (data.type === 'bomber') return 2;
+        return 3;
     }
 
     getBrainState(): BrainState | null { return this.brainState; }
@@ -572,7 +640,8 @@ export class GameScene extends Phaser.Scene {
         enemy.name = `e_${Phaser.Math.RND.uuid().slice(0, 5)}`;
         const data: EnemyData = {
             health: hps[type] * (elite ? 2 : 1), maxHealth: hps[type] * (elite ? 2 : 1),
-            type, elite, activeIntent: 'adv', fireTimer: Phaser.Math.Between(300, 1200), seed: Math.random() * 1000
+            type, elite, activeIntent: 'adv', fireTimer: Phaser.Math.Between(300, 1200), seed: Math.random() * 1000,
+            ctx: CTX.ADVANCE, ctxTimer: 0, dmgIn: 0, tactic: 0, holdFire: false, commit: 0
         };
         enemy.setData('ai', data);
         this.paintEnemy(enemy, data);
@@ -609,6 +678,7 @@ export class GameScene extends Phaser.Scene {
         const data = e.getData('ai') as EnemyData;
         if (!data) return;
         data.health -= 1;
+        data.dmgIn += 9;   // feeds the KB-1K pressure gate
         this.sfx.hit();
         e.setTintFill(0xffffff);
         this.time.delayedCall(70, () => {
@@ -873,6 +943,8 @@ export class GameScene extends Phaser.Scene {
                 eb.velocity.y += (-base * 1.1 - eb.velocity.y) * 0.07;
                 eb.velocity.x *= 0.96;
             }
+            // pressure memory: decays so a unit that breaks contact recovers
+            data.dmgIn *= 0.995;
             // Cap speed (prevents EMP slingshots escaping the sim).
             const maxV = base * 2.4 + 120;
             const sp = Math.hypot(eb.velocity.x, eb.velocity.y);
@@ -882,7 +954,7 @@ export class GameScene extends Phaser.Scene {
             data.fireTimer += delta;
             const urge = (enemy.getData('shootN') as number | undefined) ?? 0.5;
             const period = (data.type === 'fighter' ? 1500 : 2300) * (1.3 - urge * 0.7) / (data.elite ? 1.4 : 1) * DIFF_PLAY[this.difficulty].fire;
-            if (data.fireTimer > period && enemy.y > 0 && enemy.y < this.player.y - 40) {
+            if (data.fireTimer > period && !data.holdFire && enemy.y > 0 && enemy.y < this.player.y - 40) {
                 data.fireTimer = 0;
                 const eb2 = this.enemyBullets.create(enemy.x, enemy.y + 20, data.elite ? 'missile' : 'laser_red') as Phaser.Physics.Arcade.Sprite;
                 eb2.setScale(0.5).setDepth(7).setTint(data.elite ? this.theme.elite : this.theme.bulletEnemy);
@@ -1046,11 +1118,24 @@ export class GameScene extends Phaser.Scene {
 
     private applyLocalBrain(state: { p: number[]; e: unknown[][]; proj: number; noise: number }, elapsedMs: number) {
         const s = this.buildBrainState(state);
-        this.events.emit('decision_latency', { ms: Math.round(elapsedMs * 10) / 10, source: this.brainKind === 'ppo' ? 'ppo' : 'local-twin' });
+        this.commitCounter = 0;
+        this.ctxMix = [0, 0, 0, 0];
+        this.events.emit('decision_latency', {
+            ms: Math.round(elapsedMs * 10) / 10,
+            source: this.brainKind === 'ppo' ? 'ppo' : this.brainKind === 'kb1k' ? 'kb1k' : 'local-twin'
+        });
         this.enemies.getChildren().forEach((e) => {
             const enemy = e as Phaser.Physics.Arcade.Sprite;
             const data = enemy.getData('ai') as EnemyData;
             if (!data) return;
+            data.commit += 1;
+            this.commitCounter++;
+
+            if (this.brainKind === 'kb1k') {
+                this.kb1kThink(enemy, data, s, state.noise);
+                return;
+            }
+
             const f = brainFeatures(s, enemy.name);
             let choice: string;
             let conf: number;
@@ -1070,6 +1155,7 @@ export class GameScene extends Phaser.Scene {
             }
             enemy.setData('shootN', brainShoot(f, state.noise));
             data.activeIntent = choice;
+            data.holdFire = false;
             this.recordDecision(conf);
             this.events.emit('decision_made', {
                 id: enemy.name, x: enemy.x, y: enemy.y,

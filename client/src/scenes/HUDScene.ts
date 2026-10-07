@@ -2,6 +2,7 @@ import * as Phaser from 'phaser';
 import type { GameScene } from './GameScene';
 import { explainFactors, type Factor } from '../ai/localBrain';
 import { BRAIN_INFO } from '../ai/tinyBrain';
+import { META as KB1K_META } from '../ai/kb1k';
 import { safeArea, uiScale } from '../ui/safeArea';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -50,6 +51,14 @@ const SYS_BAKEOFF = [
     ['ppo-linear 54 par', 'fitness +0.181 · 0% win · 0 dmg · 216 B'],
     ['constant ADV', 'DISQUALIFIED (survival floor)'],
     ['constant STRF', 'DISQUALIFIED (survival floor)']
+];
+
+// Measured by server/bake_off_squad.py — symmetrical 3v3, 160 seeds.
+const SYS_SQUAD = [
+    ['1KB gated (948 B)', 'fitness +0.53 · retain 0.42 · lowest variance'],
+    ['46B flat (46 B)', 'DISQUALIFIED — retention 0.11, dies'],
+    ['any constant tactic', 'DISQUALIFIED (survival floor)'],
+    ['gate usage', 'ADVANCE/FLANK/HOLD/RETREAT all visited']
 ];
 
 const SYS_DIFFS = [
@@ -294,6 +303,10 @@ export class HUDScene extends Phaser.Scene {
         this.touchLayer.add([this.fireGfx, this.empGfx, this.fireZone, this.empZone]);
     }
 
+    private brainIndex(): number {
+        return this.gs?.brainKind === 'kb1k' ? 1 : this.gs?.brainKind === 'ppo' ? 2 : 0;
+    }
+
     private setFire(down: boolean) {
         if (this.fireDown === down) return;
         this.fireDown = down;
@@ -430,14 +443,18 @@ export class HUDScene extends Phaser.Scene {
             this.gs.events.emit('hud:control_mode', next);
             this.pushFeed(`CONTROLS: ${next.toUpperCase()} mode`, 0.5);
         }); by += 40;
-        this.makeBtn(this.godPanel, by, `🧠  Brain: ${this.gs.brainKind === 'ppo' ? 'PPO 246 par' : '46 BYTES'}`, () => {
-            const next = this.gs.brainKind === 'ppo' ? 'tiny' : 'ppo';
-            this.gs.events.emit('hud:brain', next);
-            this.pushFeed(next === 'ppo'
-                ? 'BRAIN: PPO student (246 params) — watch it fail to close in'
-                : 'BRAIN: 46-byte closed-form policy', 0.5);
+        const brainRow = this.makeSegRow(12, by, ['46B', '1KB', 'PPO'], ['46B', '1KB', 'PPO'][this.brainIndex()], () => {
+            const kinds: ('tiny' | 'kb1k' | 'ppo')[] = ['tiny', 'kb1k', 'ppo'];
+            this.gs.events.emit('hud:brain', kinds[this.brainIndex()]);
+            this.pushFeed(`BRAIN: ${kinds[this.brainIndex()].toUpperCase()}`, 0.5);
             this.layout();
         });
+        this.godPanel.add(brainRow.container);
+        this.diffSets.push((sel: string) => {
+            const map: Record<string, number> = { '46B': 0, '1KB': 1, 'PPO': 2 };
+            if (sel in map) brainRow.set(['46B', '1KB', 'PPO'][map[sel]]);
+        });
+        by += 46;
     }
 
     private createSysPanel() {
@@ -456,6 +473,9 @@ export class HUDScene extends Phaser.Scene {
         y += 6;
         mk('BAKE-OFF vs PPO · 200 seeds', 10, '#51e08c');
         SYS_BAKEOFF.forEach(([a, b]) => mk(`${a}\n   ${b}`, 9, '#aabbdd'));
+        y += 6;
+        mk(`BAKE-OFF 3v3 · 1KB GATED (${KB1K_META.payloadBytes} B)`, 10, '#51e08c');
+        SYS_SQUAD.forEach(([a, b]) => mk(`${a}\n   ${b}`, 9, '#aabbdd'));
         y += 6;
         mk('VERSUS CLASSIC GAME AI', 10, '#7eb8ff');
         SYS_DIFFS.forEach(([a, b]) => mk(`${a}\n   ${b}`, 9, '#aabbdd'));
@@ -748,6 +768,12 @@ export class HUDScene extends Phaser.Scene {
             this.layoutTouchPads();
         });
         ev.on('hud:syspanel', () => this.toggleSys());
+        ev.on('brain_changed', (k: string) => {
+            const bytes = k === 'kb1k' ? KB1K_META.payloadBytes : k === 'ppo' ? 246 : BRAIN_INFO.bytes;
+            this.themeLabel = this.themeLabel;
+            this.pushFeed(`BRAIN: ${k === 'kb1k' ? '1KB GATED' : k === 'ppo' ? 'PPO 246' : '46 BYTES'} (${bytes} B)`, 0.5);
+            this.layout();
+        });
         this.onDifficulty(this.gs.difficulty, true);
         this.drawHealth(5, 5);
     }

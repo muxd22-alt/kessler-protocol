@@ -1,0 +1,153 @@
+{
+  "seeds": 160,
+  "fitness_constants": {
+    "w_damage": 0.35,
+    "w_win": 0.4,
+    "w_survival": 0.25,
+    "lambda_var": 0.15,
+    "survival_floor": 0.2
+  },
+  "payload_bytes": 948,
+  "results": [
+    {
+      "fitness": 0.5341,
+      "disqualified": false,
+      "thrup": 0.661,
+      "prog": 0.494,
+      "retain": 0.425,
+      "variance": 0.00983,
+      "win_rate": 0.3187,
+      "damage": 227.1,
+      "kills": 2.08,
+      "context_mix": [
+        0.126,
+        0.788,
+        0.062,
+        0.024
+      ],
+      "tactic_spread": 2,
+      "name": "kb1k 948B (gated)",
+      "bytes": 948
+    },
+    {
+      "fitness": 0.3385,
+      "disqualified": false,
+      "thrup": 0.371,
+      "prog": 0.191,
+      "retain": 0.541,
+      "variance": 0.02045,
+      "win_rate": 0.0688,
+      "damage": 87.7,
+      "kills": 1.42,
+      "context_mix": [
+        0.089,
+        0.846,
+        0.046,
+        0.019
+      ],
+      "tactic_spread": 6,
+      "name": "kb1k teacher f32",
+      "bytes": 3072
+    },
+    {
+      "fitness": -1.0,
+      "disqualified": true,
+      "thrup": 0.645,
+      "prog": 0.347,
+      "retain": 0.109,
+      "variance": 0.04799,
+      "win_rate": 0.0,
+      "damage": 159.6,
+      "kills": 0.01,
+      "context_mix": [
+        0.431,
+        0.514,
+        0.019,
+        0.035
+      ],
+      "tactic_spread": 3,
+      "name": "kb46 46B (flat)",
+      "bytes": 46
+    },
+    {
+      "fitness": -1.0,
+      "disqualified": true,
+      "thrup": 0.876,
+      "prog": 0.545,
+      "retain": 0.042,
+      "variance": 0.11735,
+      "win_rate": 0.1375,
+      "damage": 250.6,
+      "kills": 1.59,
+      "context_mix": [
+        0.624,
+        0.321,
+        0.028,
+        0.027
+      ],
+      "tactic_spread": 1,
+      "name": "constant strike",
+      "bytes": 0
+    },
+    {
+      "fitness": -1.0,
+      "disqualified": true,
+      "thrup": 0.0,
+      "prog": 0.0,
+      "retain": 0.0,
+      "variance": 0.0,
+      "win_rate": 0.0,
+      "damage": 0.0,
+      "kills": 0.0,
+      "context_mix": [
+        0.554,
+        0.446,
+        0.0,
+        0.0
+      ],
+      "tactic_spread": 1,
+      "name": "constant guard",
+      "bytes": 0
+    },
+    {
+      "fitness": -1.0,
+      "disqualified": true,
+      "thrup": 0.0,
+      "prog": 0.0,
+      "retain": 0.0,
+      "variance": 0.0,
+      "win_rate": 0.0,
+      "damage": 0.0,
+      "kills": 0.0,
+      "context_mix": [
+        0.501,
+        0.499,
+        0.0,
+        0.0
+      ],
+      "tactic_spread": 1,
+      "name": "constant orbit",
+      "bytes": 0
+    },
+    {
+      "fitness": -1.0,
+      "disqualified": true,
+      "thrup": 0.535,
+      "prog": 0.113,
+      "retain": 0.006,
+      "variance": 0.05203,
+      "win_rate": 0.0063,
+      "damage": 51.8,
+      "kills": 0.03,
+      "context_mix": [
+        0.554,
+        0.389,
+        0.044,
+        0.013
+      ],
+      "tactic_spread": 1,
+      "name": "constant bait",
+      "bytes": 0
+    }
+  ]
+}
