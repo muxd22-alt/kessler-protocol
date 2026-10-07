@@ -1,0 +1,83 @@
+# Regenerates the heavy bake-off tables (~5 min, too slow to block a deploy).
+# Run on demand: Actions -> Bake-off tables -> Run workflow
+name: Bake-off tables
+
+on:
+  workflow_dispatch:
+  schedule:
+    # nightly, so the published numbers never drift from the code
+    - cron: '17 4 * * *'
+
+jobs:
+  tables:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Derive the 46-byte policy
+        run: python3 server/train_brain.py
+
+      - name: Tune teacher posture against the pre-registered fitness
+        run: python3 server/tune_teacher.py
+
+      - name: Derive the 1KB orthogonal-context-gated policy
+        run: python3 server/derive_kb1k.py
+
+      - name: Train PPO students (pure python, no numpy)
+        run: python3 server/train_ppo.py
+
+      # Bake-off v1 — 46 bytes vs pure-python PPO (1v1 arena)
+      - name: Bake-off v1 — 46B vs PPO
+        run: python3 server/bake_off.py
+
+      # Bake-off v2 — symmetrical 3v3, 46B flat vs 948B gated
+      - name: Bake-off v2 — 3v3 gated vs flat
+        run: python3 server/bake_off_squad.py
+
+      - name: Arena determinism re-check
+        run: python3 server/gen_golden.py --check
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bake-off-tables
+          path: |
+            server/bake_off.json
+            server/bake_off_squad.json
+            server/heldout_results.json
+            server/brain_weights.json
+            server/kb1k_weights.json
+
+      - name: Comment results on the run
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const run = context.payload;
+            let body = '### Bake-off tables regenerated\n\n';
+            try {
+              const v1 = JSON.parse(fs.readFileSync('server/bake_off.json', 'utf8'));
+              const v2 = JSON.parse(fs.readFileSync('server/bake_off_squad.json', 'utf8'));
+              body += '**v1 — 46B vs PPO (1v1)**\n\n';
+              body += '| policy | fitness | win | damage | bytes |\n|---|---|---|---|---|\n';
+              for (const r of v1.results) {
+                body += `| ${r.name} | ${r.fitness >= 0 ? '+' : ''}${r.fitness} | ${r.win_rate} | ${r.mean_damage} | ${r.bytes_int8 || 0} |\n`;
+              }
+              body += '\n**v2 — 3v3 gated vs flat**\n\n';
+              body += '| policy | fitness | retain | win | bytes |\n|---|---|---|---|---|\n';
+              for (const r of v2.results) {
+                body += `| ${r.name} | ${r.fitness >= 0 ? '+' : ''}${r.fitness} | ${r.retain} | ${r.win_rate} | ${r.bytes} |\n`;
+              }
+            } catch (e) {
+              body += 'Could not parse results: ' + e.message + '\n';
+            }
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });

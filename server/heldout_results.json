@@ -50,40 +50,40 @@
       "train": {
         "label": "train",
         "n": 60,
-        "win_rate": 0.25,
-        "damage": 261.5,
-        "retention": 0.3123,
-        "throughput": 0.7512
+        "win_rate": 0.2333,
+        "damage": 226.2,
+        "retention": 0.3733,
+        "throughput": 0.6339
       },
       "heldout": {
         "label": "held-out",
         "n": 60,
-        "win_rate": 0.45,
-        "damage": 233.7,
-        "retention": 0.3101,
-        "throughput": 0.792
+        "win_rate": 0.3833,
+        "damage": 219.4,
+        "retention": 0.3512,
+        "throughput": 0.6708
       },
-      "win_gap": 0.2
+      "win_gap": 0.15
     },
     {
       "brain": "46B flat",
       "train": {
         "label": "train",
         "n": 60,
-        "win_rate": 0.0167,
-        "damage": 167.5,
-        "retention": 0.0913,
-        "throughput": 0.6974
+        "win_rate": 0.0,
+        "damage": 170.8,
+        "retention": 0.0773,
+        "throughput": 0.6628
       },
       "heldout": {
         "label": "held-out",
         "n": 60,
         "win_rate": 0.05,
-        "damage": 146.0,
-        "retention": 0.1462,
-        "throughput": 0.9016
+        "damage": 151.9,
+        "retention": 0.1243,
+        "throughput": 0.9102
       },
-      "win_gap": 0.0333
+      "win_gap": 0.05
     }
   ]
 }

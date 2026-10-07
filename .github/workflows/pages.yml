@@ -42,14 +42,19 @@ jobs:
       - name: Typecheck + build
         run: npm run build
 
-      - name: Determinism golden vectors (TS vs Python)
+      # The job's working-directory is client/, so repo-level paths are relative.
+      # This step is the whole point: the browser generator and the headless
+      # trainer must build byte-identical arenas from the same seed.
+      - name: Arena determinism — symmetry audit + TS/Python golden vectors
         run: |
-          python server/gen_golden.py --check
-          npx esbuild test/golden_arenas.test.ts --bundle --platform=node --format=cjs --outfile=test/.golden.tmp.cjs --log-level=error
-          cd test && node .golden.tmp.cjs
+          python3 ../server/gen_golden.py --check
+          npx esbuild ../test/golden_arenas.test.ts --bundle --platform=node --format=cjs --outfile=../test/.golden.tmp.cjs --log-level=error
+          cd ../test && node .golden.tmp.cjs
 
-      - name: Arena symmetry audit
-        run: python server/gen_golden.py --check
+      # Re-measures the generalisation claim on every deploy: train seeds vs
+      # reserved held-out seeds. Fails loudly if the champion regresses.
+      - name: Generalisation — held-out seeds
+        run: python3 ../server/heldout_eval.py
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
